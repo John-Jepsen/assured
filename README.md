@@ -316,15 +316,35 @@ enabled. `/api/payments/config` always reports `test_mode: true`.
 
 ---
 
-## Generating screenshots
+## Screenshots
 
-No screenshots are committed. To capture them:
+Captured from the running Docker stack (`docs/screenshots/`).
 
-1. `docker compose up --build` (or the local dev servers).
-2. Open the web app (http://localhost:8080), pick a demo customer, run a few
-   [demo scenarios](#demo-scenarios), and try the microphone.
-3. Open the **Admin** tab to show routing, tool calls, sources, and latencies.
-4. Capture with your OS screenshot tool and drop images in `docs/screenshots/`.
+**Customer chat** — synthetic-customer selector, deterministic verification (matched
+factors shown), grounded `$500` answer with collapsible sources, and the honest
+"not enough verified information" response before verifying:
+
+![Customer chat](docs/screenshots/customer-chat.png)
+
+**Admin dashboard** — conversation transcript with per-message agent + intent, and the
+tool-execution table with latencies (structured execution info, not chain-of-thought):
+
+![Admin dashboard](docs/screenshots/admin-dashboard.png)
+
+**Admin — evaluations** (38/38), **tool activity**, and **providers/features** tabs:
+
+![Evaluations](docs/screenshots/admin-evaluations.png)
+
+### Regenerating screenshots
+
+They're produced by driving the running app with headless Chromium (Playwright):
+
+```bash
+docker compose up --build            # or make dev + make dev-web
+# in a scratch dir:
+npm i -D playwright && npx playwright install chromium
+WEB_URL=http://localhost:8080 node scripts/screenshots.mjs   # script in scripts/
+```
 
 ---
 
