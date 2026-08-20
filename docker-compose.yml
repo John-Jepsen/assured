@@ -1,0 +1,59 @@
+# Insurance AI — multimodal customer service platform (synthetic demo).
+# Three services: Postgres (pgvector), the async API/agent/speech/telephony backend,
+# and the React frontend (nginx, proxies API + WebSockets). Readiness is enforced with
+# health checks + depends_on conditions — no fixed sleep timers.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: insurance
+      POSTGRES_PASSWORD: insurance
+      POSTGRES_DB: insurance_ai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insurance -d insurance_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      args:
+        # Set to "true" to bake the speech/ML extras into the image (larger build).
+        INSTALL_SPEECH: "${INSTALL_SPEECH:-false}"
+    env_file:
+      # Optional: holds provider keys (OpenAI / Stripe test / Twilio / HF). The demo
+      # runs fully without it on mock/local providers.
+      - path: .env
+        required: false
+    environment:
+      INSURANCE_AI_DATABASE_URL: postgresql+asyncpg://insurance:insurance@postgres:5432/insurance_ai
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Persistent model cache — models download once, survive restarts.
+      - modelcache:/models
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
+  modelcache:

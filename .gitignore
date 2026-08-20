@@ -1,0 +1,39 @@
+# Secrets / config
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node / frontend
+node_modules/
+apps/web/dist/
+apps/web/.vite/
+
+# Databases / local artifacts
+*.db
+*.sqlite
+*.sqlite3
+tests/.api_test.db
+
+# Model weights / caches (never commit)
+models/
+*.onnx
+*.gguf
+*.safetensors
+*.bin
+.hf_home/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
