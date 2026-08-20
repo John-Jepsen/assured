@@ -36,6 +36,6 @@ WORKDIR /app/apps/api
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
-    CMD curl -fsS http://localhost:8000/ready | grep -q '"ready": true' || exit 1
+    CMD curl -fsS http://localhost:8000/ready | grep -qE '"ready"[[:space:]]*:[[:space:]]*true' || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]
