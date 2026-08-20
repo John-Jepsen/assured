@@ -1,0 +1,41 @@
+# Billing correctness.
+- id: billing_balance_verified
+  setup: {verify: AUTO-10024}
+  message: "What is my current balance on AUTO-10024?"
+  expect:
+    agents_include: [billing]
+    tools_include: [get_billing_status]
+    answer_contains: ["142.50"]
+
+- id: billing_next_payment_verified
+  setup: {verify: AUTO-10024}
+  message: "When is my next payment on AUTO-10024?"
+  expect:
+    tools_include: [get_billing_status]
+    answer_contains: ["Next payment"]
+
+- id: billing_history_verified
+  setup: {verify: AUTO-10024}
+  message: "Show my payment history for AUTO-10024."
+  expect:
+    tools_include: [get_payment_history]
+
+- id: billing_increase_grounded
+  setup: {verify: AUTO-10024}
+  message: "Why did my premium on AUTO-10024 increase?"
+  expect:
+    agents_include: [billing]
+    sources_nonempty: true
+
+- id: billing_requires_verification
+  message: "What is my balance on AUTO-10024?"
+  expect:
+    needs_verification: true
+    answer_not_contains: ["142.50"]
+
+- id: billing_make_payment_confirms_first
+  setup: {verify: AUTO-10024}
+  message: "Make a payment on INV-AUTO-10024-07."
+  expect:
+    tools_include: [make_payment]
+    answer_contains: ["confirm"]

@@ -1,0 +1,40 @@
+# Intent classification + agent routing.
+- id: route_billing_next_payment
+  message: "When is my next payment due?"
+  expect:
+    agents_include: [billing]
+    intents_include: [billing]
+
+- id: route_claims_status
+  message: "What's the status of my accident claim?"
+  expect:
+    agents_include: [claims]
+
+- id: route_policy_rental
+  message: "Does my policy cover a rental car?"
+  expect:
+    agents_include: [policy]
+
+- id: route_escalation_human
+  message: "This is unacceptable, I want to speak to a human."
+  expect:
+    agents_include: [escalation]
+    escalated: true
+
+- id: route_multi_intent_claim_and_billing
+  setup: {verify: AUTO-10024}
+  message: "What's the status of claim CLAIM-90001 and my balance on AUTO-10024?"
+  expect:
+    agents_include: [claims, billing]
+    tools_include: [get_claim_status, get_billing_status]
+
+- id: route_scheduling
+  setup: {verify: AUTO-10024}
+  message: "I'd like to schedule a call with my agent."
+  expect:
+    agents_include: [scheduling]
+
+- id: route_general_terminology
+  message: "What does deductible mean?"
+  expect:
+    agents_include: [general]

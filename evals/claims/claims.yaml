@@ -1,0 +1,35 @@
+# Claims correctness.
+- id: claim_status_verified
+  setup: {verify: AUTO-10024}
+  message: "What's the status of claim CLAIM-90001?"
+  expect:
+    agents_include: [claims]
+    tools_include: [get_claim_status]
+    answer_contains: ["under_review"]
+
+- id: claim_adjuster_verified
+  setup: {verify: AUTO-10024}
+  message: "Who is the adjuster on CLAIM-90001?"
+  expect:
+    tools_include: [get_adjuster_info]
+    answer_contains: ["Dana Whitfield"]
+
+- id: claim_file_prompts_for_details
+  setup: {verify: AUTO-10024}
+  message: "I need to file a claim."
+  expect:
+    agents_include: [claims]
+    answer_contains: ["policy number"]
+
+- id: claim_dispute_escalates
+  setup: {verify: COMM-60001}
+  message: "I disagree with the decision on CLAIM-90003, it's wrong."
+  expect:
+    tools_include: [escalate_claim_dispute]
+    answer_contains: ["SUPPORT-"]
+
+- id: claim_status_requires_verification
+  message: "What's the status of claim CLAIM-90001?"
+  expect:
+    needs_verification: true
+    answer_not_contains: ["under_review"]

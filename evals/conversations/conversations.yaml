@@ -1,0 +1,35 @@
+# Multi-turn conversation continuity + failure handling.
+- id: verify_then_answer
+  turns:
+    - message: "My policy number is AUTO-10024 and my ZIP is 78258."
+      expect:
+        answer_contains: ["verified"]
+    - message: "Great. What's my collision deductible?"
+      expect:
+        answer_contains: ["500"]
+
+- id: unverified_then_verify_then_billing
+  turns:
+    - message: "What's my balance on AUTO-10024?"
+      expect:
+        needs_verification: true
+    - message: "Here is my info: policy AUTO-10024, ZIP 78258."
+      expect:
+        answer_contains: ["verified"]
+    - message: "Okay, what's my balance on AUTO-10024?"
+      expect:
+        answer_contains: ["142.50"]
+
+- id: multi_intent_single_turn
+  setup: {verify: AUTO-10024}
+  message: "Tell me my claim CLAIM-90001 status and my next payment on AUTO-10024."
+  expect:
+    agents_include: [claims, billing]
+    answer_contains: ["under_review", "Next payment"]
+
+- id: escalation_after_dispute
+  setup: {verify: COMM-60001}
+  message: "I strongly disagree with CLAIM-90003 and demand a human review this now."
+  expect:
+    escalated: true
+    answer_contains: ["SUPPORT-"]

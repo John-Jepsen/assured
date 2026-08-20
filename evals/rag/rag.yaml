@@ -1,0 +1,30 @@
+# Retrieval correctness + source grounding.
+- id: rag_rental_reimbursement
+  message: "How does rental reimbursement work on an auto policy?"
+  expect:
+    tools_include: [search_knowledge]
+    answer_contains: ["rental"]
+    sources_nonempty: true
+
+- id: rag_terminology_deductible
+  message: "What is a deductible?"
+  expect:
+    sources_nonempty: true
+    answer_contains: ["deductible"]
+
+- id: rag_claims_process
+  message: "How does the claims process work and what is an FNOL?"
+  expect:
+    tools_include: [search_knowledge]
+    sources_nonempty: true
+
+- id: rag_home_exclusions
+  message: "Are floods covered under a homeowners policy?"
+  expect:
+    sources_nonempty: true
+
+- id: rag_no_match_is_honest
+  message: "What is the capital of France?"
+  expect:
+    sources_empty: true
+    answer_contains: ["couldn't find"]

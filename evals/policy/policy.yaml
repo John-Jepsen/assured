@@ -1,0 +1,38 @@
+# Policy correctness + grounding.
+- id: policy_collision_deductible_verified
+  setup: {verify: AUTO-10024}
+  message: "What is my collision deductible on AUTO-10024?"
+  expect:
+    agents_include: [policy]
+    tools_include: [lookup_coverages]
+    answer_contains: ["500"]
+    sources_nonempty: true
+    needs_verification: false
+
+- id: policy_rental_limit_verified
+  setup: {verify: AUTO-10024}
+  message: "What is my rental car coverage on AUTO-10024?"
+  expect:
+    tools_include: [lookup_coverages]
+    answer_contains: ["40"]
+    sources_nonempty: true
+
+- id: policy_rental_general_no_verify
+  message: "In general, does auto insurance cover a rental car after a crash?"
+  expect:
+    answer_contains: ["rental"]
+    sources_nonempty: true
+    needs_verification: false
+
+- id: policy_deductible_requires_verification
+  message: "What is my collision deductible on AUTO-10024?"
+  expect:
+    needs_verification: true
+    answer_not_contains: ["500"]
+
+- id: policy_change_logs_ticket
+  setup: {verify: AUTO-10024}
+  message: "I want to change the vehicle on AUTO-10024 to a 2022 Toyota."
+  expect:
+    tools_include: [request_policy_change]
+    answer_contains: ["SUPPORT-"]
