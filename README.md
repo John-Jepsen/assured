@@ -158,6 +158,28 @@ Ollama can also pull models **directly from Hugging Face** (GGUF), e.g.
 > `$500` deductible answer) and real `nomic-embed-text` embeddings pass all 38 eval cases
 > with clean relevance separation (in-domain ≈0.75–0.85 vs off-topic ≈0.4–0.47).
 
+### …with audible voice (Piper TTS + Whisper STT)
+
+To make the assistant actually **speak** (real neural TTS instead of placeholder audio)
+and enable server-side speech-to-text for the phone path:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.speech.yml up --build
+```
+
+This builds the API with the `speech` extra and switches to **Piper** TTS + **faster-whisper**
+STT. The Piper voice (~60 MB) and Whisper model (~150 MB) auto-download on first use into
+the mounted `/models` cache (downloaded once, reused after). Browser voice input still uses
+the Web Speech API; combine all three overlays for a fully-real stack:
+
+```bash
+docker compose -f docker-compose.yml \
+  -f docker-compose.models.yml -f docker-compose.speech.yml up --build
+```
+
+> Verified in-container: the voice WebSocket returns real Piper WAV audio (~0.5 MB across
+> two streamed sentences vs the ~9 KB mock tone), with per-stage latency metrics.
+
 ---
 
 ## Local setup (no Docker)

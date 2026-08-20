@@ -1,0 +1,22 @@
+# Overlay: enable REAL speech — Piper TTS (audible responses) + faster-whisper STT
+# (server-side transcription for the phone path). Browser voice input still uses the
+# Web Speech API; this makes the assistant actually SPEAK.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.speech.yml up --build
+#
+# Builds the API image with the `speech` extra and flips the TTS/STT providers to real.
+# Models auto-download on first use into the mounted `/models` cache (Piper voice ~60 MB,
+# Whisper base ~150 MB) — downloaded once, reused after. CPU-friendly.
+# Combine with the models overlay for a fully-real stack:
+#   docker compose -f docker-compose.yml -f docker-compose.models.yml -f docker-compose.speech.yml up --build
+
+services:
+  api:
+    build:
+      args:
+        INSTALL_SPEECH: "true"
+    environment:
+      INSURANCE_AI_TTS_PROVIDER: piper
+      INSURANCE_AI_TTS_VOICE: "${PIPER_VOICE:-en_US-amy-medium}"
+      INSURANCE_AI_STT_PROVIDER: faster-whisper
+      INSURANCE_AI_STT_MODEL: "${WHISPER_MODEL:-Systran/faster-whisper-base.en}"
