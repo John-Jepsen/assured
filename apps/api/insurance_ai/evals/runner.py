@@ -165,7 +165,7 @@ async def run_suite(
         print(f"  {cat:14s} {p}/{len(rs)}")
         for r in rs:
             if not r.passed:
-                print(f"     ✗ {r.id}: {'; '.join(r.failures)}")
+                print(f"     FAIL {r.id}: {'; '.join(r.failures)}")
     print(
         f"\nTOTAL: {passed}/{len(results)} passed "
         f"({(passed / len(results) * 100 if results else 0):.0f}%)\n"

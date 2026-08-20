@@ -7,12 +7,12 @@
 answers only what it can verify.*
 
 A realistic, **fully synthetic** AI customer-service system for an insurance company.
-It supports text and voice (text↔text, text↔voice, voice↔text, voice↔voice), a
+It supports text and voice (text<->text, text<->voice, voice<->text, voice<->voice), a
 multi-agent orchestrator with tool calling and retrieval-augmented generation,
 deterministic identity verification and authorization, human escalation, an admin
 dashboard, automated evaluations, and a containerized deployment.
 
-> ⚠️ **All data is synthetic.** No real customers, PII, or live payments. Demo
+> **Note — all data is synthetic.** No real customers, PII, or live payments. Demo
 > customers, policies, claims, and documents are fabricated for demonstration.
 
 ---
@@ -42,21 +42,21 @@ dashboard, automated evaluations, and a containerized deployment.
 
 | Capability | Status |
 |---|---|
-| Text → text chat (streaming) | ✅ |
-| Browser voice (STT → agent → TTS), voice↔voice | ✅ |
-| Barge-in / interruption during TTS | ✅ |
-| Multi-agent orchestration (router + 7 specialists) | ✅ |
-| Multi-intent handling in one message | ✅ |
-| Tool calling (25 typed, authorized, logged tools) | ✅ |
-| Retrieval-augmented generation with source attribution | ✅ |
-| Deterministic identity verification + tool authorization | ✅ |
-| Cross-customer access prevention | ✅ |
-| Human escalation + structured handoff + support tickets | ✅ |
-| Admin dashboard (traces, tools, sources, latencies, tickets, evals) | ✅ |
-| Mock payments (default) + Stripe test-mode adapter | ✅ |
-| Telephony via Twilio Media Streams | ✅ (needs credentials) |
-| Automated evaluation suite (`make eval`) | ✅ (38 cases) |
-| Docker Compose deployment with health checks | ✅ |
+| Text → text chat (streaming) | Yes |
+| Browser voice (STT → agent → TTS), voice<->voice | Yes |
+| Barge-in / interruption during TTS | Yes |
+| Multi-agent orchestration (router + 7 specialists) | Yes |
+| Multi-intent handling in one message | Yes |
+| Tool calling (25 typed, authorized, logged tools) | Yes |
+| Retrieval-augmented generation with source attribution | Yes |
+| Deterministic identity verification + tool authorization | Yes |
+| Cross-customer access prevention | Yes |
+| Human escalation + structured handoff + support tickets | Yes |
+| Admin dashboard (traces, tools, sources, latencies, tickets, evals) | Yes |
+| Mock payments (default) + Stripe test-mode adapter | Yes |
+| Telephony via Twilio Media Streams | Yes (needs credentials) |
+| Automated evaluation suite (`make eval`) | Yes (38 cases) |
+| Docker Compose deployment with health checks | Yes |
 
 **Insurance products:** auto, homeowners, renters, life, health, commercial, umbrella.
 
@@ -73,8 +73,8 @@ missing, the system says so and offers to escalate.
 
 ```mermaid
 flowchart TD
-    Phone[📞 Phone call - Twilio] --> API
-    Web[🖥️ React web app] <--> API[FastAPI gateway]
+    Phone[Phone call - Twilio] --> API
+    Web[React web app] <--> API[FastAPI gateway]
     API --> STT[STT provider<br/>faster-whisper / mock / browser Web Speech]
     API --> TTS[TTS provider<br/>Piper / mock]
     API --> ORCH[Orchestrator<br/>deterministic intent router]

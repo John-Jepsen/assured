@@ -492,7 +492,7 @@ export default function CustomerPage() {
             }
             aria-pressed={voice.listening}
           >
-            {voice.listening ? "● Stop" : "🎙 Mic"}
+            {voice.listening ? "Stop" : "Mic"}
           </button>
         </div>
         {voice.playing && (
