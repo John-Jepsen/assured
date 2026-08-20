@@ -440,5 +440,12 @@ Full detail in [`docs/security.md`](docs/security.md).
 
 ---
 
+## License
+
+Released under the [MIT License](LICENSE) — free to use, modify, and learn from.
+All bundled data is synthetic; the license covers the code and documentation.
+
+---
+
 Built as a software- and AI-engineering portfolio project. See `CHANGELOG.md` for the
 build log and `docs/` for deep dives.
