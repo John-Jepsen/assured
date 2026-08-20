@@ -1,4 +1,7 @@
-# Insurance AI — Multimodal Customer Service Platform
+# Assured — Multimodal Voice-to-Voice Insurance AI
+
+*One assistant orchestrating multiple models (LLM · STT · TTS · embeddings) — that
+answers only what it can verify.*
 
 A realistic, **fully synthetic** AI customer-service system for an insurance company.
 It supports text and voice (text↔text, text↔voice, voice↔text, voice↔voice), a

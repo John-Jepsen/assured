@@ -1,7 +1,7 @@
 [project]
-name = "insurance-ai"
+name = "assured"
 version = "0.1.0"
-description = "Multimodal AI insurance customer service platform"
+description = "Assured — Multimodal Voice-to-Voice Insurance AI (synthetic demo)"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.7",

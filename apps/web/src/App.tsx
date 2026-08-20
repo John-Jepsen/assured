@@ -26,7 +26,9 @@ function Header() {
           ◈
         </span>
         <div className="app-title-wrap">
-          <span className="app-title">Aegis Assist</span>
+          <span className="app-title" title="Multimodal Voice-to-Voice Insurance AI">
+            Assured
+          </span>
           <span className="badge badge-synthetic">SYNTHETIC DEMO DATA</span>
         </div>
       </div>

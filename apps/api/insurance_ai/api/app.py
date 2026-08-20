@@ -29,7 +29,11 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Insurance AI", version=__version__, lifespan=lifespan)
+    app = FastAPI(
+        title="Assured — Multimodal Voice-to-Voice Insurance AI",
+        version=__version__,
+        lifespan=lifespan,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

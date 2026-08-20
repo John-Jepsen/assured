@@ -1,4 +1,4 @@
-# Aegis Assist — Web (Synthetic Demo)
+# Assured — Web (Synthetic Demo)
 
 Multimodal AI insurance customer-service demo UI. React 18 + TypeScript + Vite.
 All data is **synthetic**.
