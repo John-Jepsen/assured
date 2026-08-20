@@ -117,7 +117,7 @@ The default demo needs **no GPU, no model downloads, and no credentials.**
 ## Quick start (Docker)
 
 ```bash
-git clone <this-repo> && cd text-to-voice
+git clone <this-repo> && cd assured
 docker compose up --build
 ```
 
