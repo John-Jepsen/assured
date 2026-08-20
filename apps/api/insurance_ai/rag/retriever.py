@@ -109,11 +109,14 @@ class Retriever:
             scored = sorted(zip(rows, sims.tolist()), key=lambda x: -x[1])
             min_score = self.settings.rag_min_score
 
-        results: list[Retrieved] = []
+        # Build a candidate pool (>= top_k) that clears the threshold, then optionally
+        # rerank the pool and return the best top_k.
+        pool_size = max(top_k, self.settings.rag_candidate_pool)
+        pool: list[Retrieved] = []
         for chunk, score in scored:
             if score < min_score:
                 continue
-            results.append(
+            pool.append(
                 Retrieved(
                     chunk_id=chunk.id, document_id=chunk.document_id,
                     content=sanitize(chunk.content), citation=chunk.citation,
@@ -121,9 +124,15 @@ class Retriever:
                     category=chunk.category,
                 )
             )
-            if len(results) >= top_k:
+            if len(pool) >= pool_size:
                 break
-        return results
+        if self.settings.rag_rerank != "none" and len(pool) > 1:
+            from insurance_ai.rag.rerank import rerank
+
+            pool = rerank(
+                self.settings.rag_rerank, query, pool, self.settings.rag_reranker_model
+            )
+        return pool[:top_k]
 
     def _bm25(self, query: str, rows: list, k1: float = 1.5, b: float = 0.75):
         """BM25 over the candidate chunks, normalised to ~[0,1] by the best score."""

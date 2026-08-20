@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    # Optional OpenTelemetry tracing. When enabled, the API is auto-instrumented and
+    # spans export via OTLP to the standard OTEL_EXPORTER_OTLP_ENDPOINT (or the default
+    # http://localhost:4318). Off by default; requires the `otel` extra.
+    otel_enabled: bool = False
+    otel_service_name: str = "insurance-ai-api"
 
     # --- database ----------------------------------------------------------
     # Async SQLAlchemy URL. Default points at the compose Postgres service.
@@ -80,6 +85,10 @@ class Settings(BaseSettings):
     rag_chunk_overlap: int = 120
     rag_top_k: int = 4
     rag_min_score: float = 0.22
+    # Optional reranking of the retrieved candidate pool before taking top_k.
+    rag_rerank: Literal["none", "lexical", "cross-encoder"] = "none"
+    rag_candidate_pool: int = 12  # how many candidates to rerank over
+    rag_reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     # --- security ----------------------------------------------------------
     verification_max_attempts: int = 3

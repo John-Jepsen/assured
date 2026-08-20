@@ -49,6 +49,36 @@ def get_logger(name: str = "insurance_ai"):
     return structlog.get_logger(name)
 
 
+def setup_tracing(app) -> bool:
+    """Enable OpenTelemetry auto-instrumentation if configured. Never fatal.
+
+    Returns True if tracing was set up. Requires the `otel` extra; if the packages
+    are missing it logs a clear hint and continues (observability stays best-effort).
+    """
+    settings = get_settings()
+    if not settings.otel_enabled:
+        return False
+    log = get_logger("otel")
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError:
+        log.warning("otel_libs_missing", hint="pip install -e '.[otel]' to enable tracing")
+        return False
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": settings.otel_service_name})
+    )
+    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+    trace.set_tracer_provider(provider)
+    FastAPIInstrumentor.instrument_app(app)
+    log.info("otel_enabled", service=settings.otel_service_name)
+    return True
+
+
 @contextmanager
 def timed(store: dict[str, float], key: str):
     start = time.perf_counter()

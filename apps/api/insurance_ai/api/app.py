@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from insurance_ai import __version__
 from insurance_ai.config import get_settings
-from insurance_ai.observability import configure_logging, get_logger
+from insurance_ai.observability import configure_logging, get_logger, setup_tracing
 from insurance_ai.tools.registry import load_all_tools
 
 log = get_logger("api")
@@ -53,6 +53,8 @@ def create_app() -> FastAPI:
     app.include_router(routes_admin.router)
     app.include_router(routes_payments.router)
     app.include_router(routes_telephony.router)
+
+    setup_tracing(app)  # no-op unless INSURANCE_AI_OTEL_ENABLED=true + `otel` extra
 
     @app.exception_handler(Exception)
     async def _unhandled(_request, exc):  # never leak a stack trace

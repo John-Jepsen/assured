@@ -416,13 +416,23 @@ Full detail in [`docs/security.md`](docs/security.md).
 
 ---
 
+## Optional: reranking & tracing
+
+- **Retrieval reranking** — set `INSURANCE_AI_RAG_RERANK=lexical` (deterministic,
+  dependency-free — promotes passages that actually contain the query's terms) or
+  `cross-encoder` (needs the `speech` extra). Default `none`. Reranks a candidate pool
+  before taking top-k; it only reorders real passages, never invents content.
+- **OpenTelemetry** — set `INSURANCE_AI_OTEL_ENABLED=true` and install the extra
+  (`pip install -e '.[otel]'`). The API is auto-instrumented and spans export via OTLP
+  to `OTEL_EXPORTER_OTLP_ENDPOINT`. Off by default; enabling without the extra logs a
+  hint and continues (observability stays best-effort).
+
 ## Future improvements
 
-- Dense reranking on top of retrieval; hybrid BM25 + embedding scoring.
+- Hybrid BM25 + embedding scoring; learned reranking.
 - Optional LLM-driven tool planning via PydanticAI `FunctionModel` for capable models,
   behind the same authorization gate.
 - Conversation summarization for long-context memory management.
-- OpenTelemetry traces/metrics export.
 - Server-side streaming STT for lower browser-voice latency.
 
 ---
