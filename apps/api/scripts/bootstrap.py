@@ -50,14 +50,19 @@ async def main(knowledge_dir: Path, if_empty: bool = False) -> None:
         rag = await ingest_directory(db, knowledge_dir, get_providers().embedding)
         log.info("ingested", provider=get_providers().embedding.name, **rag)
     await engine.dispose()
-    print(f"Bootstrap complete: seed={counts or 'skipped'}, ingested {rag} "
-          f"with '{get_providers().embedding.name}' embeddings.")
+    print(
+        f"Bootstrap complete: seed={counts or 'skipped'}, ingested {rag} "
+        f"with '{get_providers().embedding.name}' embeddings."
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--knowledge", type=Path, default=DEFAULT_KNOWLEDGE)
-    parser.add_argument("--if-empty", action="store_true",
-                        help="Only seed/ingest when the database has no customers yet.")
+    parser.add_argument(
+        "--if-empty",
+        action="store_true",
+        help="Only seed/ingest when the database has no customers yet.",
+    )
     args = parser.parse_args()
     asyncio.run(main(args.knowledge, if_empty=args.if_empty))

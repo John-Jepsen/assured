@@ -51,28 +51,30 @@ class OpenAICompatLLM(LLMProvider):
             "temperature": kwargs.get("temperature", 0.2),
             "stream": True,
         }
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream(
+        async with (
+            httpx.AsyncClient(timeout=120) as client,
+            client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",
                 json=payload,
                 headers=self._headers(),
-            ) as r:
-                r.raise_for_status()
-                async for line in r.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data.strip() == "[DONE]":
-                        break
-                    import json
+            ) as r,
+        ):
+            r.raise_for_status()
+            async for line in r.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data.strip() == "[DONE]":
+                    break
+                import json
 
-                    try:
-                        delta = json.loads(data)["choices"][0]["delta"].get("content")
-                    except (KeyError, IndexError, ValueError):
-                        continue
-                    if delta:
-                        yield delta
+                try:
+                    delta = json.loads(data)["choices"][0]["delta"].get("content")
+                except (KeyError, IndexError, ValueError):
+                    continue
+                if delta:
+                    yield delta
 
 
 class OpenAIEmbedding(EmbeddingProvider):
@@ -105,7 +107,7 @@ class OllamaEmbedding(OpenAIEmbedding):
 
     name = "ollama"
 
-    def __init__(self, settings) -> None:  # noqa: ANN001
+    def __init__(self, settings) -> None:
         super().__init__(settings)
         self.base_url = settings.ollama_base_url.rstrip("/") + "/v1"
         self.api_key = "ollama"

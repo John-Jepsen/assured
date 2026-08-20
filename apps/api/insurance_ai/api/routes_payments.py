@@ -20,8 +20,7 @@ async def payment_config() -> dict:
         "provider": provider.name,
         "test_mode": True,  # always test mode; live payments are never enabled
         "stripe_configured": settings.is_stripe_enabled,
-        "note": "Mock provider active." if provider.name == "mock"
-        else "Stripe TEST mode active.",
+        "note": "Mock provider active." if provider.name == "mock" else "Stripe TEST mode active.",
     }
 
 
@@ -37,9 +36,7 @@ async def stripe_webhook(request: Request) -> dict:
         try:
             import stripe
 
-            event = stripe.Webhook.construct_event(
-                payload, sig, settings.stripe_webhook_secret
-            )
+            event = stripe.Webhook.construct_event(payload, sig, settings.stripe_webhook_secret)
             log.info("stripe_webhook", event_type=event.get("type"))
             return {"received": True, "type": event.get("type")}
         except Exception as e:

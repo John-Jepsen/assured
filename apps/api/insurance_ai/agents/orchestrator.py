@@ -111,11 +111,14 @@ class Orchestrator:
             claim.last_name = name_m.group(1)
         result = await verify_identity(db, session, claim)
         trace.verification_status = session.verification_status
-        trace.tool_calls.append({
-            "tool_name": "verify_identity", "ok": result.status == VerificationStatus.VERIFIED,
-            "arguments": {"factors": result.matched_factors},
-            "result_summary": result.message,
-        })
+        trace.tool_calls.append(
+            {
+                "tool_name": "verify_identity",
+                "ok": result.status == VerificationStatus.VERIFIED,
+                "arguments": {"factors": result.matched_factors},
+                "result_summary": result.message,
+            }
+        )
         return result.message
 
     async def run(
@@ -137,8 +140,11 @@ class Orchestrator:
         verify_msg = await self._maybe_verify(db, session, message, intent, trace)
 
         ctx = ToolContext(
-            session=session, db=db, providers=self.providers,
-            conversation_id=session.conversation_id, log_sink=log_sink,
+            session=session,
+            db=db,
+            providers=self.providers,
+            conversation_id=session.conversation_id,
+            log_sink=log_sink,
         )
 
         turns = []
@@ -151,11 +157,16 @@ class Orchestrator:
             turn = await specialist.handle(ctx, message, intent)
             trace.latencies_ms[f"agent:{agent_name.value}"] = (time.perf_counter() - ts) * 1000
             for tc in turn.tool_calls:
-                trace.tool_calls.append({
-                    "tool_name": tc.tool_name, "arguments": tc.arguments, "ok": tc.ok,
-                    "error_code": tc.error_code, "result_summary": tc.result_summary,
-                    "agent": agent_name.value,
-                })
+                trace.tool_calls.append(
+                    {
+                        "tool_name": tc.tool_name,
+                        "arguments": tc.arguments,
+                        "ok": tc.ok,
+                        "error_code": tc.error_code,
+                        "result_summary": tc.result_summary,
+                        "agent": agent_name.value,
+                    }
+                )
             turns.append(turn)
 
         draft, sources, needs_verification, escalated = compose(turns, session.is_verified)
@@ -171,7 +182,9 @@ class Orchestrator:
         trace.latencies_ms["total_plan_ms"] = (time.perf_counter() - t0) * 1000
         return OrchestratorResult(answer=draft, trace=trace, needs_verification=needs_verification)
 
-    async def stream_answer(self, draft: str, message: str, system_prompt: str) -> AsyncIterator[str]:
+    async def stream_answer(
+        self, draft: str, message: str, system_prompt: str
+    ) -> AsyncIterator[str]:
         """Stream the grounded draft (mock) or LLM-phrased version (real provider)."""
         if self.settings.llm_provider == "mock":
             msgs = [ChatMessage(role="system", content="GROUNDED_ANSWER:" + draft)]
@@ -180,7 +193,8 @@ class Orchestrator:
                 ChatMessage(role="system", content=system_prompt),
                 ChatMessage(
                     role="system",
-                    content="Grounded facts — phrase these concisely and add NOTHING else:\n" + draft,
+                    content="Grounded facts — phrase these concisely and add NOTHING else:\n"
+                    + draft,
                 ),
                 ChatMessage(role="user", content=message),
             ]
@@ -190,6 +204,9 @@ class Orchestrator:
 
 def _source_dict(s: Source) -> dict[str, Any]:
     return {
-        "citation": s.citation, "document_id": s.document_id, "chunk_id": s.chunk_id,
-        "score": s.score, "snippet": s.snippet,
+        "citation": s.citation,
+        "document_id": s.document_id,
+        "chunk_id": s.chunk_id,
+        "score": s.score,
+        "snippet": s.snippet,
     }

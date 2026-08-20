@@ -29,7 +29,11 @@ async def _invoices_for(ctx: ToolContext, policy: Policy) -> list[Invoice]:
 async def _get_billing_status(ctx: ToolContext, args: PolicyNumberArgs) -> ToolResult:
     policy = await require_owned_policy(ctx.auth, args.policy_number)
     invoices = await _invoices_for(ctx, policy)
-    outstanding = [i for i in invoices if i.status in (PaymentStatus.PENDING, PaymentStatus.PAST_DUE, PaymentStatus.SCHEDULED)]
+    outstanding = [
+        i
+        for i in invoices
+        if i.status in (PaymentStatus.PENDING, PaymentStatus.PAST_DUE, PaymentStatus.SCHEDULED)
+    ]
     balance = sum(float(i.amount_due) - float(i.amount_paid) for i in outstanding)
     next_due = min((i.due_date for i in outstanding), default=None)
     return ToolResult.success(
@@ -92,8 +96,12 @@ async def _make_payment(ctx: ToolContext, args: MakePaymentArgs) -> ToolResult:
     if not args.confirm:
         # Sensitive action — require explicit confirmation before charging.
         return ToolResult.success(
-            {"requires_confirmation": True, "invoice_number": invoice.invoice_number,
-             "amount": round(amount, 2), "balance": round(balance, 2)},
+            {
+                "requires_confirmation": True,
+                "invoice_number": invoice.invoice_number,
+                "amount": round(amount, 2),
+                "balance": round(balance, 2),
+            },
             message=(
                 f"You're about to pay ${amount:.2f} toward {invoice.invoice_number}. "
                 "Shall I confirm this payment?"
@@ -103,9 +111,11 @@ async def _make_payment(ctx: ToolContext, args: MakePaymentArgs) -> ToolResult:
     provider = get_payment_provider()
     result = await provider.charge(amount, "usd", f"Premium payment {invoice.invoice_number}")
     payment = Payment(
-        invoice_id=invoice.id, amount=amount,
+        invoice_id=invoice.id,
+        amount=amount,
         status=PaymentStatus.PAID if result.ok else PaymentStatus.FAILED,
-        method=result.method, provider_reference=result.reference,
+        method=result.method,
+        provider_reference=result.reference,
     )
     ctx.db.add(payment)
     if result.ok:
@@ -120,20 +130,42 @@ async def _make_payment(ctx: ToolContext, args: MakePaymentArgs) -> ToolResult:
         # Never claim success when the charge failed.
         return ToolResult.failure("payment_failed", result.message)
     return ToolResult.success(
-        {"invoice_number": invoice.invoice_number, "amount_paid": round(amount, 2),
-         "reference": result.reference, "test_mode": provider.test_mode,
-         "new_status": invoice.status},
+        {
+            "invoice_number": invoice.invoice_number,
+            "amount_paid": round(amount, 2),
+            "reference": result.reference,
+            "test_mode": provider.test_mode,
+            "new_status": invoice.status,
+        },
         message=result.message,
         sources=[Source(citation=f"Billing Account — {invoice.invoice_number}")],
     )
 
 
 for _tool in (
-    Tool("get_billing_status", "Retrieve balance, next payment date, autopay status.",
-         PolicyNumberArgs, _get_billing_status, requires_verification=True, agents=BILLING_AGENTS),
-    Tool("get_payment_history", "Retrieve payment history for a policy.", PolicyNumberArgs,
-         _get_payment_history, requires_verification=True, agents=BILLING_AGENTS),
-    Tool("make_payment", "Make a premium payment (TEST MODE). Requires confirm=true to charge.",
-         MakePaymentArgs, _make_payment, requires_verification=True, agents=BILLING_AGENTS),
+    Tool(
+        "get_billing_status",
+        "Retrieve balance, next payment date, autopay status.",
+        PolicyNumberArgs,
+        _get_billing_status,
+        requires_verification=True,
+        agents=BILLING_AGENTS,
+    ),
+    Tool(
+        "get_payment_history",
+        "Retrieve payment history for a policy.",
+        PolicyNumberArgs,
+        _get_payment_history,
+        requires_verification=True,
+        agents=BILLING_AGENTS,
+    ),
+    Tool(
+        "make_payment",
+        "Make a premium payment (TEST MODE). Requires confirm=true to charge.",
+        MakePaymentArgs,
+        _make_payment,
+        requires_verification=True,
+        agents=BILLING_AGENTS,
+    ),
 ):
     register(_tool)

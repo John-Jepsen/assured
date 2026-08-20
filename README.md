@@ -1,5 +1,8 @@
 # Assured — Multimodal Voice-to-Voice Insurance AI
 
+[![CI](https://github.com/John-Jepsen/assured/actions/workflows/ci.yml/badge.svg)](https://github.com/John-Jepsen/assured/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 *One assistant orchestrating multiple models (LLM · STT · TTS · embeddings) — that
 answers only what it can verify.*
 

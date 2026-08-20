@@ -91,9 +91,21 @@ async def _create_ticket(ctx: ToolContext, args: TicketArgs) -> ToolResult:
 
 
 for _tool in (
-    Tool("transfer_to_human", "Escalate to a human with a structured handoff.", TransferArgs,
-         _transfer_to_human, requires_verification=False, agents=ESC_AGENTS),
-    Tool("create_support_ticket", "Create a support ticket.", TicketArgs, _create_ticket,
-         requires_verification=False, agents=ESC_AGENTS),
+    Tool(
+        "transfer_to_human",
+        "Escalate to a human with a structured handoff.",
+        TransferArgs,
+        _transfer_to_human,
+        requires_verification=False,
+        agents=ESC_AGENTS,
+    ),
+    Tool(
+        "create_support_ticket",
+        "Create a support ticket.",
+        TicketArgs,
+        _create_ticket,
+        requires_verification=False,
+        agents=ESC_AGENTS,
+    ),
 ):
     register(_tool)

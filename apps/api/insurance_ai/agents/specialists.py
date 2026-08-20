@@ -35,9 +35,7 @@ async def _resolve_single_policy(ctx: ToolContext, product: str | None) -> str |
 
     from insurance_ai.db.models import Policy
 
-    rows = await ctx.db.execute(
-        select(Policy).where(Policy.customer_id == ctx.session.customer_id)
-    )
+    rows = await ctx.db.execute(select(Policy).where(Policy.customer_id == ctx.session.customer_id))
     policies = list(rows.scalars().all())
     if product:
         matching = [p for p in policies if p.product_type == product]
@@ -58,7 +56,10 @@ def _snippet(text: str, max_chars: int = 260) -> str:
 
 class PolicyAgent(Specialist):
     name = AgentName.POLICY
-    system_prompt = _GUARDRAIL + " You handle coverage, deductibles, limits, exclusions, renewals, and policy changes."
+    system_prompt = (
+        _GUARDRAIL
+        + " You handle coverage, deductibles, limits, exclusions, renewals, and policy changes."
+    )
 
     async def augment(self, ctx: ToolContext, message: str, intent: IntentResult) -> None:
         if not intent.entities.policy_numbers and re.search(
@@ -81,13 +82,22 @@ class PolicyAgent(Specialist):
             else:
                 calls.append(PlannedCall("lookup_policy", {"policy_number": pol}))
             if re.search(r"change|add|remove|update .*(vehicle|driver)", m):
-                calls.append(PlannedCall(
-                    "request_policy_change",
-                    {"policy_number": pol, "change_type": "requested_change", "details": message},
-                ))
+                calls.append(
+                    PlannedCall(
+                        "request_policy_change",
+                        {
+                            "policy_number": pol,
+                            "change_type": "requested_change",
+                            "details": message,
+                        },
+                    )
+                )
         if re.search(r"cover|rental|deductible|limit|exclusion|glass|windshield|tow", m):
-            calls.append(PlannedCall(
-                "search_knowledge", {"query": message, "product_type": infer_product(message)}))
+            calls.append(
+                PlannedCall(
+                    "search_knowledge", {"query": message, "product_type": infer_product(message)}
+                )
+            )
         return calls
 
     def fact_from_data(self, turn, tool_name, data):
@@ -95,8 +105,10 @@ class PolicyAgent(Specialist):
             for c in data.get("coverages", []):
                 parts = [c["coverage_type"].replace("_", " ").title()]
                 if c.get("limit_amount") is not None:
-                    parts.append(f"limit ${c['limit_amount']:,.0f}"
-                                 + (f" {c['per_unit']}" if c.get('per_unit') else ""))
+                    parts.append(
+                        f"limit ${c['limit_amount']:,.0f}"
+                        + (f" {c['per_unit']}" if c.get("per_unit") else "")
+                    )
                 if c.get("deductible") is not None:
                     parts.append(f"deductible ${c['deductible']:,.0f}")
                 turn.facts.append(" — ".join(parts) + ".")
@@ -105,7 +117,9 @@ class PolicyAgent(Specialist):
 
     def post_process(self, turn: AgentTurn, message: str, intent: IntentResult) -> None:
         if not turn.tool_calls and re.search(r"my (policy|coverage)", message.lower()):
-            turn.clarification = "Which policy is this about? A policy number like AUTO-10024 helps."
+            turn.clarification = (
+                "Which policy is this about? A policy number like AUTO-10024 helps."
+            )
 
 
 class ClaimsAgent(Specialist):
@@ -138,7 +152,10 @@ class ClaimsAgent(Specialist):
 
     def post_process(self, turn, message, intent):
         m = message.lower()
-        if re.search(r"\bfile\b.*claim|start a claim|new claim", m) and not intent.entities.claim_numbers:
+        if (
+            re.search(r"\bfile\b.*claim|start a claim|new claim", m)
+            and not intent.entities.claim_numbers
+        ):
             turn.clarification = (
                 "I can start a first notice of loss. What's the policy number, the type of loss, "
                 "and the date it happened?"
@@ -147,11 +164,15 @@ class ClaimsAgent(Specialist):
 
 class BillingAgent(Specialist):
     name = AgentName.BILLING
-    system_prompt = _GUARDRAIL + " You handle premiums, balances, payment history, and payments (TEST MODE)."
+    system_prompt = (
+        _GUARDRAIL + " You handle premiums, balances, payment history, and payments (TEST MODE)."
+    )
 
     async def augment(self, ctx: ToolContext, message: str, intent: IntentResult) -> None:
-        if not intent.entities.policy_numbers and not intent.entities.invoice_numbers and re.search(
-            r"balance|payment|premium|autopay|bill", message.lower()
+        if (
+            not intent.entities.policy_numbers
+            and not intent.entities.invoice_numbers
+            and re.search(r"balance|payment|premium|autopay|bill", message.lower())
         ):
             resolved = await _resolve_single_policy(ctx, infer_product(message))
             if resolved:
@@ -183,14 +204,20 @@ class BillingAgent(Specialist):
 
     def post_process(self, turn, message, intent):
         m = message.lower()
-        if re.search(r"pay|payment|balance|premium", m) and not intent.entities.policy_numbers \
-                and not intent.entities.invoice_numbers and not turn.needs_verification:
+        if (
+            re.search(r"pay|payment|balance|premium", m)
+            and not intent.entities.policy_numbers
+            and not intent.entities.invoice_numbers
+            and not turn.needs_verification
+        ):
             turn.clarification = "Which policy's billing should I look at? A policy number helps."
 
 
 class AccountAgent(Specialist):
     name = AgentName.ACCOUNT
-    system_prompt = _GUARDRAIL + " You handle account profile, associated policies/claims, contact updates."
+    system_prompt = (
+        _GUARDRAIL + " You handle account profile, associated policies/claims, contact updates."
+    )
 
     def plan(self, message: str, intent: IntentResult, ctx: ToolContext) -> list[PlannedCall]:
         m = message.lower()
@@ -206,7 +233,9 @@ class AccountAgent(Specialist):
 
 class SchedulingAgent(Specialist):
     name = AgentName.SCHEDULING
-    system_prompt = _GUARDRAIL + " You schedule agent/adjuster/claims calls and manage appointments."
+    system_prompt = (
+        _GUARDRAIL + " You schedule agent/adjuster/claims calls and manage appointments."
+    )
 
     def plan(self, message: str, intent: IntentResult, ctx: ToolContext) -> list[PlannedCall]:
         # Scheduling requires a concrete time; if absent, post_process asks for it.
@@ -216,7 +245,8 @@ class SchedulingAgent(Specialist):
         if intent.entities.dates:
             turn.clarification = (
                 "I can schedule that. What time on "
-                f"{intent.entities.dates[0]} works, and is this with your agent or a claims adjuster?"
+                f"{intent.entities.dates[0]} works, and is this with your agent "
+                "or a claims adjuster?"
             )
         else:
             turn.clarification = (
@@ -227,11 +257,16 @@ class SchedulingAgent(Specialist):
 
 class GeneralAgent(Specialist):
     name = AgentName.GENERAL
-    system_prompt = _GUARDRAIL + " You answer general insurance questions and terminology from documentation."
+    system_prompt = (
+        _GUARDRAIL + " You answer general insurance questions and terminology from documentation."
+    )
 
     def plan(self, message: str, intent: IntentResult, ctx: ToolContext) -> list[PlannedCall]:
-        return [PlannedCall(
-            "search_knowledge", {"query": message, "product_type": infer_product(message)})]
+        return [
+            PlannedCall(
+                "search_knowledge", {"query": message, "product_type": infer_product(message)}
+            )
+        ]
 
     def fact_from_data(self, turn, tool_name, data):
         if tool_name == "search_knowledge":
@@ -244,14 +279,27 @@ class EscalationAgent(Specialist):
     system_prompt = _GUARDRAIL + " You produce a structured human handoff and support ticket."
 
     def plan(self, message: str, intent: IntentResult, ctx: ToolContext) -> list[PlannedCall]:
-        return [PlannedCall("transfer_to_human", {
-            "reason": "customer_requested_human" if "human" in message.lower() else "escalation",
-            "urgency": "high" if re.search(r"urgent|asap|immediately|angry", message.lower()) else "normal",
-            "summary": message[:400],
-            "intents": intent.intents,
-            "policy_number": intent.entities.policy_numbers[0] if intent.entities.policy_numbers else None,
-            "claim_number": intent.entities.claim_numbers[0] if intent.entities.claim_numbers else None,
-        })]
+        return [
+            PlannedCall(
+                "transfer_to_human",
+                {
+                    "reason": "customer_requested_human"
+                    if "human" in message.lower()
+                    else "escalation",
+                    "urgency": "high"
+                    if re.search(r"urgent|asap|immediately|angry", message.lower())
+                    else "normal",
+                    "summary": message[:400],
+                    "intents": intent.intents,
+                    "policy_number": intent.entities.policy_numbers[0]
+                    if intent.entities.policy_numbers
+                    else None,
+                    "claim_number": intent.entities.claim_numbers[0]
+                    if intent.entities.claim_numbers
+                    else None,
+                },
+            )
+        ]
 
     def post_process(self, turn: AgentTurn, message, intent):
         turn.escalated = True

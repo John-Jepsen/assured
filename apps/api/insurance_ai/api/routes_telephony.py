@@ -37,7 +37,9 @@ async def voice_webhook(request: Request) -> PlainTextResponse:
             "</Response>",
             media_type="application/xml",
         )
-    base = (settings.public_base_url or "").replace("https://", "wss://").replace("http://", "ws://")
+    base = (
+        (settings.public_base_url or "").replace("https://", "wss://").replace("http://", "ws://")
+    )
     ws_url = f"{base}/api/telephony/media"
     return PlainTextResponse(twiml_media_stream(ws_url), media_type="application/xml")
 
@@ -71,15 +73,22 @@ async def media_stream(ws: WebSocket) -> None:
                 if stt.text.strip():
                     async with SessionFactory() as db:
                         result, _sess, conv = await _service.handle_message(
-                            db, conversation_id, stt.text, channel="phone",
+                            db,
+                            conversation_id,
+                            stt.text,
+                            channel="phone",
                             request_id=str(uuid.uuid4()),
                         )
                         conversation_id = conv.id
                     audio_out = await providers.tts.synthesize(result.answer)
-                    await ws.send_text(json.dumps({
-                        "event": "media",
-                        "media": {"payload": base64.b64encode(audio_out.data).decode()},
-                    }))
+                    await ws.send_text(
+                        json.dumps(
+                            {
+                                "event": "media",
+                                "media": {"payload": base64.b64encode(audio_out.data).decode()},
+                            }
+                        )
+                    )
             elif ev == "stop":
                 break
     except WebSocketDisconnect:

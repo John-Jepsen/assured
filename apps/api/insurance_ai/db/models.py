@@ -8,7 +8,7 @@ backend additionally maintains a native ``vector`` column (see migrations).
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     JSON,
@@ -32,7 +32,7 @@ def _uuid() -> str:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Customer(Base):
@@ -50,8 +50,8 @@ class Customer(Base):
     is_synthetic: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    policies: Mapped[list["Policy"]] = relationship(back_populates="customer")
-    claims: Mapped[list["Claim"]] = relationship(back_populates="customer")
+    policies: Mapped[list[Policy]] = relationship(back_populates="customer")
+    claims: Mapped[list[Claim]] = relationship(back_populates="customer")
 
 
 class Policy(Base):
@@ -71,10 +71,10 @@ class Policy(Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
 
     customer: Mapped[Customer] = relationship(back_populates="policies")
-    assets: Mapped[list["InsuredAsset"]] = relationship(back_populates="policy")
-    coverages: Mapped[list["Coverage"]] = relationship(back_populates="policy")
-    claims: Mapped[list["Claim"]] = relationship(back_populates="policy")
-    invoices: Mapped[list["Invoice"]] = relationship(back_populates="policy")
+    assets: Mapped[list[InsuredAsset]] = relationship(back_populates="policy")
+    coverages: Mapped[list[Coverage]] = relationship(back_populates="policy")
+    claims: Mapped[list[Claim]] = relationship(back_populates="policy")
+    invoices: Mapped[list[Invoice]] = relationship(back_populates="policy")
 
 
 class InsuredAsset(Base):
@@ -142,7 +142,7 @@ class Invoice(Base):
     period_end: Mapped[date] = mapped_column(Date)
 
     policy: Mapped[Policy] = relationship(back_populates="invoices")
-    payments: Mapped[list["Payment"]] = relationship(back_populates="invoice")
+    payments: Mapped[list[Payment]] = relationship(back_populates="invoice")
 
 
 class Payment(Base):
@@ -204,7 +204,7 @@ class Conversation(Base):
         DateTime(timezone=True), default=_now, onupdate=_now
     )
 
-    messages: Mapped[list["Message"]] = relationship(
+    messages: Mapped[list[Message]] = relationship(
         back_populates="conversation", order_by="Message.created_at"
     )
 
@@ -252,7 +252,7 @@ class KnowledgeDocument(Base):
     category: Mapped[str] = mapped_column(String)  # billing, claims, faq, ...
     content: Mapped[str] = mapped_column(Text)
 
-    chunks: Mapped[list["DocumentChunk"]] = relationship(back_populates="document")
+    chunks: Mapped[list[DocumentChunk]] = relationship(back_populates="document")
 
 
 class DocumentChunk(Base):

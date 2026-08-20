@@ -40,11 +40,11 @@ class ToolResult:
     sources: list[Source] = field(default_factory=list)
 
     @classmethod
-    def success(cls, data: dict[str, Any], message: str = "", sources=None) -> "ToolResult":
+    def success(cls, data: dict[str, Any], message: str = "", sources=None) -> ToolResult:
         return cls(ok=True, data=data, message=message, sources=sources or [])
 
     @classmethod
-    def failure(cls, code: str, message: str) -> "ToolResult":
+    def failure(cls, code: str, message: str) -> ToolResult:
         return cls(ok=False, error_code=code, message=message)
 
     def to_dict(self) -> dict[str, Any]:

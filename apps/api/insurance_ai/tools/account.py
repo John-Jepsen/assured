@@ -41,40 +41,62 @@ async def _get_customer(ctx: ToolContext, args: NoArgs) -> ToolResult:
 
 async def _list_policies(ctx: ToolContext, args: NoArgs) -> ToolResult:
     await require_verified(ctx.auth)
-    rows = await ctx.db.execute(
-        select(Policy).where(Policy.customer_id == ctx.session.customer_id)
-    )
+    rows = await ctx.db.execute(select(Policy).where(Policy.customer_id == ctx.session.customer_id))
     policies = rows.scalars().all()
     return ToolResult.success(
-        {"policies": [
-            {"policy_number": p.policy_number, "product_type": p.product_type, "status": p.status}
-            for p in policies
-        ]},
+        {
+            "policies": [
+                {
+                    "policy_number": p.policy_number,
+                    "product_type": p.product_type,
+                    "status": p.status,
+                }
+                for p in policies
+            ]
+        },
         message=f"You have {len(policies)} policy(ies) on file.",
     )
 
 
 async def _list_claims(ctx: ToolContext, args: NoArgs) -> ToolResult:
     await require_verified(ctx.auth)
-    rows = await ctx.db.execute(
-        select(Claim).where(Claim.customer_id == ctx.session.customer_id)
-    )
+    rows = await ctx.db.execute(select(Claim).where(Claim.customer_id == ctx.session.customer_id))
     claims = rows.scalars().all()
     return ToolResult.success(
-        {"claims": [
-            {"claim_number": c.claim_number, "status": c.status, "loss_type": c.loss_type}
-            for c in claims
-        ]},
+        {
+            "claims": [
+                {"claim_number": c.claim_number, "status": c.status, "loss_type": c.loss_type}
+                for c in claims
+            ]
+        },
         message=f"You have {len(claims)} claim(s) on file.",
     )
 
 
 for _tool in (
-    Tool("lookup_customer", "Retrieve the verified customer's profile (masked).", NoArgs,
-         _get_customer, requires_verification=True, agents=ACCOUNT_AGENTS),
-    Tool("list_policies", "List the verified customer's policies.", NoArgs, _list_policies,
-         requires_verification=True, agents=ACCOUNT_AGENTS),
-    Tool("list_claims", "List the verified customer's claims.", NoArgs, _list_claims,
-         requires_verification=True, agents=ACCOUNT_AGENTS),
+    Tool(
+        "lookup_customer",
+        "Retrieve the verified customer's profile (masked).",
+        NoArgs,
+        _get_customer,
+        requires_verification=True,
+        agents=ACCOUNT_AGENTS,
+    ),
+    Tool(
+        "list_policies",
+        "List the verified customer's policies.",
+        NoArgs,
+        _list_policies,
+        requires_verification=True,
+        agents=ACCOUNT_AGENTS,
+    ),
+    Tool(
+        "list_claims",
+        "List the verified customer's claims.",
+        NoArgs,
+        _list_claims,
+        requires_verification=True,
+        agents=ACCOUNT_AGENTS,
+    ),
 ):
     register(_tool)

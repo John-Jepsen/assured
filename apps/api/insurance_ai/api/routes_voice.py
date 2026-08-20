@@ -25,8 +25,8 @@ import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from insurance_ai.api.service import ConversationService
 from insurance_ai.agents.specialists import SPECIALISTS
+from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory
 from insurance_ai.domain.enums import AgentName
 from insurance_ai.observability import get_logger
@@ -38,7 +38,10 @@ _service = ConversationService()
 
 
 async def _run_response(
-    ws: WebSocket, conversation_id: str | None, audio: bytes, t_end: float,
+    ws: WebSocket,
+    conversation_id: str | None,
+    audio: bytes,
+    t_end: float,
     pretranscribed: str | None = None,
 ):
     providers = get_providers()
@@ -70,7 +73,9 @@ async def _run_response(
     first_audio_at = {"t": None}
 
     async def token_stream():
-        async for token in _service.orchestrator.stream_answer(result.answer, transcript, sys_prompt):
+        async for token in _service.orchestrator.stream_answer(
+            result.answer, transcript, sys_prompt
+        ):
             if first_token_at["t"] is None:
                 first_token_at["t"] = time.perf_counter()
                 metrics["transcript_to_first_token_ms"] = (
@@ -90,16 +95,25 @@ async def _run_response(
                     first_audio_at["t"] - first_token_at["t"]
                 ) * 1000
         if chunk.data:
-            await ws.send_json({
-                "type": "audio", "data": base64.b64encode(chunk.data).decode(),
-                "text": chunk.text, "sample_rate": chunk.sample_rate,
-            })
+            await ws.send_json(
+                {
+                    "type": "audio",
+                    "data": base64.b64encode(chunk.data).decode(),
+                    "text": chunk.text,
+                    "sample_rate": chunk.sample_rate,
+                }
+            )
 
     await ws.send_json({"type": "metrics", **{k: round(v, 1) for k, v in metrics.items()}})
-    await ws.send_json({
-        "type": "done", "answer": result.answer, "sources": result.trace.sources,
-        "conversation_id": conv.id, "trace": result.trace.as_dict(),
-    })
+    await ws.send_json(
+        {
+            "type": "done",
+            "answer": result.answer,
+            "sources": result.trace.sources,
+            "conversation_id": conv.id,
+            "trace": result.trace.as_dict(),
+        }
+    )
 
 
 @router.websocket("/ws/voice")

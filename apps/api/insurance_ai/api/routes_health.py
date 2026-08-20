@@ -27,8 +27,10 @@ async def health() -> HealthStatus:
         status="ok" if db_ok == "ok" else "degraded",
         version=__version__,
         providers={
-            "llm": settings.llm_provider, "stt": settings.stt_provider,
-            "tts": settings.tts_provider, "embedding": settings.embedding_provider,
+            "llm": settings.llm_provider,
+            "stt": settings.stt_provider,
+            "tts": settings.tts_provider,
+            "embedding": settings.embedding_provider,
             "vector_backend": settings.vector_backend,
         },
         database=db_ok,

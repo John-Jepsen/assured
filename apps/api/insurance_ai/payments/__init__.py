@@ -36,12 +36,18 @@ class MockPaymentProvider(PaymentProvider):
         cents = round(amount * 100) % 100
         if cents == 99:
             return PaymentIntentResult(
-                ok=False, reference="mock_decline", status="failed", method="mock",
+                ok=False,
+                reference="mock_decline",
+                status="failed",
+                method="mock",
                 message="Payment was declined (mock simulated decline).",
             )
         ref = f"mock_{abs(hash((round(amount, 2), description))) % 10_000_000:07d}"
         return PaymentIntentResult(
-            ok=True, reference=ref, status="paid", method="mock",
+            ok=True,
+            reference=ref,
+            status="paid",
+            method="mock",
             message=f"Mock payment of {amount:.2f} {currency.upper()} succeeded (TEST MODE).",
         )
 
@@ -63,7 +69,7 @@ class StripeTestPaymentProvider(PaymentProvider):
 
         def _create():
             return self._stripe.PaymentIntent.create(
-                amount=int(round(amount * 100)),
+                amount=round(amount * 100),
                 currency=currency,
                 description=description,
                 payment_method="pm_card_visa",  # Stripe test token
@@ -75,12 +81,17 @@ class StripeTestPaymentProvider(PaymentProvider):
             intent = await asyncio.to_thread(_create)
         except Exception as e:  # surface as a structured failure, never a stack trace
             return PaymentIntentResult(
-                ok=False, reference="stripe_error", status="failed", method="stripe",
+                ok=False,
+                reference="stripe_error",
+                status="failed",
+                method="stripe",
                 message=f"Stripe test charge failed: {type(e).__name__}.",
             )
         paid = intent.status == "succeeded"
         return PaymentIntentResult(
-            ok=paid, reference=intent.id, status="paid" if paid else intent.status,
+            ok=paid,
+            reference=intent.id,
+            status="paid" if paid else intent.status,
             method="stripe",
             message=("Stripe test payment succeeded." if paid else f"Status: {intent.status}."),
         )

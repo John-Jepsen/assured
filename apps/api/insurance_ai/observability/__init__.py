@@ -12,8 +12,17 @@ from insurance_ai.config import get_settings
 
 _configured = False
 
-_SENSITIVE = {"otp_code", "date_of_birth", "card_number", "cvv", "ssn", "auth_token",
-              "api_key", "secret", "password"}
+_SENSITIVE = {
+    "otp_code",
+    "date_of_birth",
+    "card_number",
+    "cvv",
+    "ssn",
+    "auth_token",
+    "api_key",
+    "secret",
+    "password",
+}
 
 
 def _mask_processor(_logger, _method, event_dict):

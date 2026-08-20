@@ -7,9 +7,9 @@ import uuid
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from insurance_ai.agents.specialists import SPECIALISTS
 from insurance_ai.api.schemas import ChatRequest, ChatResponse, VerifyRequest
 from insurance_ai.api.service import ConversationService
-from insurance_ai.agents.specialists import SPECIALISTS
 from insurance_ai.db.base import SessionFactory, get_session
 from insurance_ai.domain.enums import AgentName
 from insurance_ai.observability import get_logger
@@ -27,8 +27,10 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_session)) -> Cha
         db, req.conversation_id, req.message, channel=req.channel, request_id=str(uuid.uuid4())
     )
     return ChatResponse(
-        conversation_id=conv.id, answer=result.answer,
-        needs_verification=result.needs_verification, trace=result.trace.as_dict(),
+        conversation_id=conv.id,
+        answer=result.answer,
+        needs_verification=result.needs_verification,
+        trace=result.trace.as_dict(),
     )
 
 
@@ -37,10 +39,14 @@ async def verify(req: VerifyRequest, db: AsyncSession = Depends(get_session)) ->
     """Deterministic verification endpoint (never routed through the LLM)."""
     sess = get_session_store().get(req.conversation_id)
     result = await verify_identity(
-        db, sess,
+        db,
+        sess,
         VerificationClaim(
-            last_name=req.last_name, zip_code=req.zip_code, policy_number=req.policy_number,
-            date_of_birth=req.date_of_birth, otp_code=req.otp_code,
+            last_name=req.last_name,
+            zip_code=req.zip_code,
+            policy_number=req.policy_number,
+            date_of_birth=req.date_of_birth,
+            otp_code=req.otp_code,
         ),
     )
     from insurance_ai.db.models import Conversation
@@ -51,8 +57,10 @@ async def verify(req: VerifyRequest, db: AsyncSession = Depends(get_session)) ->
         conv.customer_id = sess.customer_id or conv.customer_id
         await db.commit()
     return {
-        "status": result.status, "verified": sess.is_verified,
-        "matched_factors": result.matched_factors, "message": result.message,
+        "status": result.status,
+        "verified": sess.is_verified,
+        "matched_factors": result.matched_factors,
+        "message": result.message,
         "attempts_remaining": result.attempts_remaining,
     }
 
@@ -70,17 +78,27 @@ async def ws_chat(ws: WebSocket) -> None:
                 result, _sess, conv = await _service.handle_message(
                     db, conversation_id, message, request_id=str(uuid.uuid4())
                 )
-                await ws.send_json({"type": "meta", "conversation_id": conv.id,
-                                    "trace": result.trace.as_dict(),
-                                    "needs_verification": result.needs_verification})
-                agent = SPECIALISTS.get(AgentName(result.trace.agents[0])) if result.trace.agents else None
+                await ws.send_json(
+                    {
+                        "type": "meta",
+                        "conversation_id": conv.id,
+                        "trace": result.trace.as_dict(),
+                        "needs_verification": result.needs_verification,
+                    }
+                )
+                agent = (
+                    SPECIALISTS.get(AgentName(result.trace.agents[0]))
+                    if result.trace.agents
+                    else None
+                )
                 sys_prompt = agent.system_prompt if agent else ""
                 async for token in _service.orchestrator.stream_answer(
                     result.answer, message, sys_prompt
                 ):
                     await ws.send_json({"type": "token", "token": token})
-                await ws.send_json({"type": "done", "answer": result.answer,
-                                    "sources": result.trace.sources})
+                await ws.send_json(
+                    {"type": "done", "answer": result.answer, "sources": result.trace.sources}
+                )
     except WebSocketDisconnect:
         log.info("ws_chat_disconnect")
     except Exception as e:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 HardwareProfile = Literal["local-cpu", "apple-silicon", "nvidia", "cloud-gpu"]
@@ -96,7 +96,7 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = 3600
 
     @model_validator(mode="after")
-    def _check_provider_credentials(self) -> "Settings":
+    def _check_provider_credentials(self) -> Settings:
         """Fail fast when a provider is selected without its credentials."""
         if self.llm_provider == "openai" and not self.openai_api_key:
             raise ValueError("llm_provider=openai requires INSURANCE_AI_OPENAI_API_KEY")

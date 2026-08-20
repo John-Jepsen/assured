@@ -58,9 +58,7 @@ class PiperTTS(TextToSpeechProvider):
         data = await asyncio.to_thread(self._synth_bytes, text)
         return AudioChunk(data=data, sample_rate=self.sample_rate, is_final=True, text=text)
 
-    async def stream_synthesize(
-        self, text_stream: AsyncIterator[str]
-    ) -> AsyncIterator[AudioChunk]:
+    async def stream_synthesize(self, text_stream: AsyncIterator[str]) -> AsyncIterator[AudioChunk]:
         buffer = ""
         async for token in text_stream:
             buffer += token

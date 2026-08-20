@@ -51,7 +51,7 @@ class LLMProvider(ABC):
 
     def pydantic_model(self):  # pragma: no cover - overridden where supported
         """Return a pydantic-ai Model, or None to force the rule-based fallback."""
-        return None
+        return
 
 
 class SpeechToTextProvider(ABC):

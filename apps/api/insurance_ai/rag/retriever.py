@@ -26,10 +26,82 @@ from insurance_ai.providers.base import EmbeddingProvider
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _LEX_STOP = frozenset(
-    "the a an of to in on for and or is are was were be been being do does did i you my "
-    "your me we our it its this that these those what when where how why who with at by from "
-    "as if then than so about into over under can could would should will shall may might have "
-    "has had not no yes get got insurance policy coverage cover covered assistant".split()
+    [
+        "the",
+        "a",
+        "an",
+        "of",
+        "to",
+        "in",
+        "on",
+        "for",
+        "and",
+        "or",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "i",
+        "you",
+        "my",
+        "your",
+        "me",
+        "we",
+        "our",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "what",
+        "when",
+        "where",
+        "how",
+        "why",
+        "who",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "if",
+        "then",
+        "than",
+        "so",
+        "about",
+        "into",
+        "over",
+        "under",
+        "can",
+        "could",
+        "would",
+        "should",
+        "will",
+        "shall",
+        "may",
+        "might",
+        "have",
+        "has",
+        "had",
+        "not",
+        "no",
+        "yes",
+        "get",
+        "got",
+        "insurance",
+        "policy",
+        "coverage",
+        "cover",
+        "covered",
+        "assistant",
+    ]
 )
 
 
@@ -64,7 +136,7 @@ def sanitize(text: str) -> str:
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    denom = (np.linalg.norm(a) * np.linalg.norm(b, axis=1))
+    denom = np.linalg.norm(a) * np.linalg.norm(b, axis=1)
     denom = np.where(denom == 0, 1e-9, denom)
     return (b @ a) / denom
 
@@ -106,7 +178,7 @@ class Retriever:
             qvec = np.array(await self.embedder.embed_one(query), dtype=np.float32)
             matrix = np.array([r.embedding for r in rows], dtype=np.float32)
             sims = _cosine(qvec, matrix)
-            scored = sorted(zip(rows, sims.tolist()), key=lambda x: -x[1])
+            scored = sorted(zip(rows, sims.tolist(), strict=True), key=lambda x: -x[1])
             min_score = self.settings.rag_min_score
 
         # Build a candidate pool (>= top_k) that clears the threshold, then optionally
@@ -118,9 +190,12 @@ class Retriever:
                 continue
             pool.append(
                 Retrieved(
-                    chunk_id=chunk.id, document_id=chunk.document_id,
-                    content=sanitize(chunk.content), citation=chunk.citation,
-                    score=round(float(score), 4), product_type=chunk.product_type,
+                    chunk_id=chunk.id,
+                    document_id=chunk.document_id,
+                    content=sanitize(chunk.content),
+                    citation=chunk.citation,
+                    score=round(float(score), 4),
+                    product_type=chunk.product_type,
                     category=chunk.category,
                 )
             )
@@ -129,9 +204,7 @@ class Retriever:
         if self.settings.rag_rerank != "none" and len(pool) > 1:
             from insurance_ai.rag.rerank import rerank
 
-            pool = rerank(
-                self.settings.rag_rerank, query, pool, self.settings.rag_reranker_model
-            )
+            pool = rerank(self.settings.rag_rerank, query, pool, self.settings.rag_reranker_model)
         return pool[:top_k]
 
     def _bm25(self, query: str, rows: list, k1: float = 1.5, b: float = 0.75):
@@ -162,4 +235,4 @@ class Retriever:
         # Normalise by the best match so scores sit in ~[0,1]; a query with no lexical
         # overlap yields all-zero scores → nothing clears min_score → honest "no match".
         norm = [(s / best if best > 0 else 0.0) for s in raw]
-        return sorted(zip(rows, norm), key=lambda x: -x[1])
+        return sorted(zip(rows, norm, strict=True), key=lambda x: -x[1])

@@ -46,8 +46,13 @@ async def _search_knowledge(ctx: ToolContext, args: SearchArgs) -> ToolResult:
         },
         message="",  # passage content is surfaced via facts/sources, not a chatty message
         sources=[
-            Source(citation=h.citation, chunk_id=h.chunk_id, document_id=h.document_id,
-                   score=h.score, snippet=h.content[:200])
+            Source(
+                citation=h.citation,
+                chunk_id=h.chunk_id,
+                document_id=h.document_id,
+                score=h.score,
+                snippet=h.content[:200],
+            )
             for h in hits
         ],
     )

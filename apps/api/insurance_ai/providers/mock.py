@@ -39,10 +39,76 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 # question shares only stopwords with the corpus and correctly scores near zero,
 # so RAG returns nothing rather than a spurious match.
 _STOPWORDS = frozenset(
-    "the a an of to in on for and or is are was were be been being do does did i "
-    "you my your me we our it its this that these those what when where how why who "
-    "with at by from as if then than so about into over under can could would should "
-    "will shall may might have has had not no yes get got".split()
+    [
+        "the",
+        "a",
+        "an",
+        "of",
+        "to",
+        "in",
+        "on",
+        "for",
+        "and",
+        "or",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "i",
+        "you",
+        "my",
+        "your",
+        "me",
+        "we",
+        "our",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "what",
+        "when",
+        "where",
+        "how",
+        "why",
+        "who",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "if",
+        "then",
+        "than",
+        "so",
+        "about",
+        "into",
+        "over",
+        "under",
+        "can",
+        "could",
+        "would",
+        "should",
+        "will",
+        "shall",
+        "may",
+        "might",
+        "have",
+        "has",
+        "had",
+        "not",
+        "no",
+        "yes",
+        "get",
+        "got",
+    ]
 )
 
 
@@ -156,9 +222,7 @@ class MockTTS(TextToSpeechProvider):
             data=self._tone_wav(text), sample_rate=self.sample_rate, is_final=True, text=text
         )
 
-    async def stream_synthesize(
-        self, text_stream: AsyncIterator[str]
-    ) -> AsyncIterator[AudioChunk]:
+    async def stream_synthesize(self, text_stream: AsyncIterator[str]) -> AsyncIterator[AudioChunk]:
         # Incremental: synthesize per sentence as text streams in.
         buffer = ""
         async for token in text_stream:

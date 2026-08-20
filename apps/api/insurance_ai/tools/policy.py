@@ -112,9 +112,7 @@ async def _update_contact(ctx: ToolContext, args: ContactUpdateArgs) -> ToolResu
     if not updated:
         return ToolResult.failure("invalid_arguments", "No contact fields provided to update.")
     await ctx.db.commit()
-    return ToolResult.success(
-        {"updated": updated}, message="Contact information updated."
-    )
+    return ToolResult.success({"updated": updated}, message="Contact information updated.")
 
 
 class PolicyChangeArgs(BaseModel):

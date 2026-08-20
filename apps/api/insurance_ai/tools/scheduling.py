@@ -17,7 +17,9 @@ SCHED_AGENTS = ("scheduling",)
 
 
 class ScheduleArgs(BaseModel):
-    appointment_type: AppointmentType = Field(..., description="agent_call | adjuster_call | claims_call")
+    appointment_type: AppointmentType = Field(
+        ..., description="agent_call | adjuster_call | claims_call"
+    )
     scheduled_at: datetime = Field(..., description="ISO datetime for the appointment")
     notes: str | None = None
 
@@ -34,9 +36,15 @@ async def _schedule(ctx: ToolContext, args: ScheduleArgs) -> ToolResult:
     ctx.db.add(appt)
     await ctx.db.commit()
     return ToolResult.success(
-        {"appointment_id": appt.id, "appointment_type": appt.appointment_type,
-         "scheduled_at": appt.scheduled_at.isoformat()},
-        message=f"Scheduled a {args.appointment_type.replace('_', ' ')} for {args.scheduled_at:%b %d, %I:%M %p}.",
+        {
+            "appointment_id": appt.id,
+            "appointment_type": appt.appointment_type,
+            "scheduled_at": appt.scheduled_at.isoformat(),
+        },
+        message=(
+            f"Scheduled a {args.appointment_type.replace('_', ' ')} "
+            f"for {args.scheduled_at:%b %d, %I:%M %p}."
+        ),
     )
 
 
@@ -82,10 +90,17 @@ async def _list_appointments(ctx: ToolContext, args: BaseModel) -> ToolResult:
     )
     appts = rows.scalars().all()
     return ToolResult.success(
-        {"appointments": [
-            {"appointment_id": a.id, "type": a.appointment_type, "status": a.status,
-             "scheduled_at": a.scheduled_at.isoformat()} for a in appts
-        ]},
+        {
+            "appointments": [
+                {
+                    "appointment_id": a.id,
+                    "type": a.appointment_type,
+                    "status": a.status,
+                    "scheduled_at": a.scheduled_at.isoformat(),
+                }
+                for a in appts
+            ]
+        },
         message=f"You have {len(appts)} appointment(s).",
     )
 
@@ -95,15 +110,45 @@ class _Empty(BaseModel):
 
 
 for _tool in (
-    Tool("schedule_agent_call", "Schedule a call with an agent.", ScheduleArgs, _schedule,
-         requires_verification=True, agents=SCHED_AGENTS),
-    Tool("schedule_adjuster_call", "Schedule a call with a claims adjuster.", ScheduleArgs,
-         _schedule, requires_verification=True, agents=SCHED_AGENTS),
-    Tool("reschedule_appointment", "Reschedule an existing appointment.", RescheduleArgs,
-         _reschedule, requires_verification=True, agents=SCHED_AGENTS),
-    Tool("cancel_appointment", "Cancel an existing appointment.", CancelArgs, _cancel,
-         requires_verification=True, agents=SCHED_AGENTS),
-    Tool("list_appointments", "List the customer's appointments.", _Empty, _list_appointments,
-         requires_verification=True, agents=SCHED_AGENTS),
+    Tool(
+        "schedule_agent_call",
+        "Schedule a call with an agent.",
+        ScheduleArgs,
+        _schedule,
+        requires_verification=True,
+        agents=SCHED_AGENTS,
+    ),
+    Tool(
+        "schedule_adjuster_call",
+        "Schedule a call with a claims adjuster.",
+        ScheduleArgs,
+        _schedule,
+        requires_verification=True,
+        agents=SCHED_AGENTS,
+    ),
+    Tool(
+        "reschedule_appointment",
+        "Reschedule an existing appointment.",
+        RescheduleArgs,
+        _reschedule,
+        requires_verification=True,
+        agents=SCHED_AGENTS,
+    ),
+    Tool(
+        "cancel_appointment",
+        "Cancel an existing appointment.",
+        CancelArgs,
+        _cancel,
+        requires_verification=True,
+        agents=SCHED_AGENTS,
+    ),
+    Tool(
+        "list_appointments",
+        "List the customer's appointments.",
+        _Empty,
+        _list_appointments,
+        requires_verification=True,
+        agents=SCHED_AGENTS,
+    ),
 ):
     register(_tool)

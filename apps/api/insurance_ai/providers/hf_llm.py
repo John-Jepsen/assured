@@ -37,9 +37,7 @@ class HFTransformersLLM(LLMProvider):
 
     def _prompt(self, messages: list[ChatMessage]) -> str:
         chat = [{"role": m.role, "content": m.content} for m in messages]
-        return self.tokenizer.apply_chat_template(
-            chat, tokenize=False, add_generation_prompt=True
-        )
+        return self.tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
 
     async def complete(self, messages: list[ChatMessage], **kwargs) -> str:
         return "".join([t async for t in self.stream(messages, **kwargs)])
@@ -49,12 +47,13 @@ class HFTransformersLLM(LLMProvider):
 
         prompt = self._prompt(messages)
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
-        streamer = TextIteratorStreamer(
-            self.tokenizer, skip_prompt=True, skip_special_tokens=True
-        )
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
         gen_kwargs = dict(
-            **inputs, streamer=streamer, max_new_tokens=kwargs.get("max_tokens", 400),
-            do_sample=True, temperature=kwargs.get("temperature", 0.2),
+            **inputs,
+            streamer=streamer,
+            max_new_tokens=kwargs.get("max_tokens", 400),
+            do_sample=True,
+            temperature=kwargs.get("temperature", 0.2),
         )
         thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
         thread.start()

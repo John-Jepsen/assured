@@ -68,12 +68,12 @@ class Specialist:
         self.post_process(turn, message, intent)
         return turn
 
-    def _absorb(
-        self, turn: AgentTurn, name: str, args: dict, result: ToolResult
-    ) -> None:
+    def _absorb(self, turn: AgentTurn, name: str, args: dict, result: ToolResult) -> None:
         turn.tool_calls.append(
             ToolCallTrace(
-                tool_name=name, arguments=args, ok=result.ok,
+                tool_name=name,
+                arguments=args,
+                ok=result.ok,
                 error_code=result.error_code,
                 result_summary=result.message or ("ok" if result.ok else "error"),
             )

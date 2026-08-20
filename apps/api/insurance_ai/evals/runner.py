@@ -110,7 +110,8 @@ async def run_case(db, orch: Orchestrator, case: dict) -> CaseResult:
             result.failures.append(f"answer must NOT contain '{banned}'")
     if "needs_verification" in expect and last.needs_verification != expect["needs_verification"]:
         result.failures.append(
-            f"needs_verification={last.needs_verification}, expected {expect['needs_verification']}")
+            f"needs_verification={last.needs_verification}, expected {expect['needs_verification']}"
+        )
     if expect.get("sources_nonempty") and not trace.sources:
         result.failures.append("expected non-empty sources")
     if expect.get("sources_empty") and trace.sources:
@@ -118,8 +119,7 @@ async def run_case(db, orch: Orchestrator, case: dict) -> CaseResult:
     if "escalated" in expect and trace.escalated != expect["escalated"]:
         result.failures.append(f"escalated={trace.escalated}, expected {expect['escalated']}")
     if "max_latency_ms" in expect and result.latency_ms > expect["max_latency_ms"]:
-        result.failures.append(
-            f"latency {result.latency_ms:.0f}ms > {expect['max_latency_ms']}ms")
+        result.failures.append(f"latency {result.latency_ms:.0f}ms > {expect['max_latency_ms']}ms")
 
     result.passed = not result.failures
     return result
@@ -135,7 +135,9 @@ def load_cases(evals_dir: Path) -> list[dict]:
     return cases
 
 
-async def run_suite(persist: bool = True, evals_dir: Path = EVALS_DIR, dispose: bool = True) -> dict:
+async def run_suite(
+    persist: bool = True, evals_dir: Path = EVALS_DIR, dispose: bool = True
+) -> dict:
     load_all_tools()
     engine = get_engine()
     await create_schema(engine)
@@ -164,22 +166,38 @@ async def run_suite(persist: bool = True, evals_dir: Path = EVALS_DIR, dispose: 
         for r in rs:
             if not r.passed:
                 print(f"     ✗ {r.id}: {'; '.join(r.failures)}")
-    print(f"\nTOTAL: {passed}/{len(results)} passed "
-          f"({(passed/len(results)*100 if results else 0):.0f}%)\n")
+    print(
+        f"\nTOTAL: {passed}/{len(results)} passed "
+        f"({(passed / len(results) * 100 if results else 0):.0f}%)\n"
+    )
 
     if persist and results:
         async with maker() as db:
-            db.add(EvaluationRun(
-                suite="all", total=len(results), passed=passed,
-                results=[{"id": r.id, "category": r.category, "passed": r.passed,
-                          "failures": r.failures, "latency_ms": round(r.latency_ms, 1)}
-                         for r in results],
-            ))
+            db.add(
+                EvaluationRun(
+                    suite="all",
+                    total=len(results),
+                    passed=passed,
+                    results=[
+                        {
+                            "id": r.id,
+                            "category": r.category,
+                            "passed": r.passed,
+                            "failures": r.failures,
+                            "latency_ms": round(r.latency_ms, 1),
+                        }
+                        for r in results
+                    ],
+                )
+            )
             await db.commit()
     if dispose:
         await engine.dispose()
-    return {"total": len(results), "passed": passed,
-            "results": [(r.id, r.passed, r.failures) for r in results]}
+    return {
+        "total": len(results),
+        "passed": passed,
+        "results": [(r.id, r.passed, r.failures) for r in results],
+    }
 
 
 if __name__ == "__main__":

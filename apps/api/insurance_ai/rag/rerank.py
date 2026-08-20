@@ -18,8 +18,44 @@ from functools import lru_cache
 
 _WORD = re.compile(r"[a-z0-9]+")
 _STOP = frozenset(
-    "the a an of to in on for and or is are was be it this that with at by from as "
-    "what when how why do does my your i you we insurance policy coverage".split()
+    [
+        "the",
+        "a",
+        "an",
+        "of",
+        "to",
+        "in",
+        "on",
+        "for",
+        "and",
+        "or",
+        "is",
+        "are",
+        "was",
+        "be",
+        "it",
+        "this",
+        "that",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "what",
+        "when",
+        "how",
+        "why",
+        "do",
+        "does",
+        "my",
+        "your",
+        "i",
+        "you",
+        "we",
+        "insurance",
+        "policy",
+        "coverage",
+    ]
 )
 
 
@@ -55,7 +91,7 @@ def _cross_encoder(model_id: str):
 def cross_encoder_rerank(query: str, candidates: list, model_id: str):
     ce = _cross_encoder(model_id)
     scores = ce.predict([(query, c.content) for c in candidates])
-    ranked = sorted(zip(scores, candidates), key=lambda x: -float(x[0]))
+    ranked = sorted(zip(scores, candidates, strict=True), key=lambda x: -float(x[0]))
     out = []
     for s, c in ranked:
         c.score = round(float(s), 4)

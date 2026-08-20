@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 
 from insurance_ai.db.models import Claim
 from insurance_ai.domain.enums import ClaimStatus
@@ -156,17 +155,53 @@ async def _dispute_claim(ctx: ToolContext, args: ClaimNumberArgs) -> ToolResult:
 
 
 for _tool in (
-    Tool("lookup_claim", "Retrieve full details of a claim.", ClaimNumberArgs, _lookup_claim,
-         requires_verification=True, agents=CLAIMS_AGENTS),
-    Tool("get_claim_status", "Get a claim's status and next steps.", ClaimNumberArgs,
-         _get_claim_status, requires_verification=True, agents=CLAIMS_AGENTS),
-    Tool("get_adjuster_info", "Retrieve the adjuster assigned to a claim.", ClaimNumberArgs,
-         _get_adjuster, requires_verification=True, agents=CLAIMS_AGENTS),
-    Tool("create_claim", "File a simulated first notice of loss.", CreateClaimArgs, _create_claim,
-         requires_verification=True, agents=CLAIMS_AGENTS),
-    Tool("add_claim_information", "Attach additional information to a claim.", AddClaimInfoArgs,
-         _add_claim_information, requires_verification=True, agents=CLAIMS_AGENTS),
-    Tool("escalate_claim_dispute", "Open a dispute review on a claim.", ClaimNumberArgs,
-         _dispute_claim, requires_verification=True, agents=CLAIMS_AGENTS),
+    Tool(
+        "lookup_claim",
+        "Retrieve full details of a claim.",
+        ClaimNumberArgs,
+        _lookup_claim,
+        requires_verification=True,
+        agents=CLAIMS_AGENTS,
+    ),
+    Tool(
+        "get_claim_status",
+        "Get a claim's status and next steps.",
+        ClaimNumberArgs,
+        _get_claim_status,
+        requires_verification=True,
+        agents=CLAIMS_AGENTS,
+    ),
+    Tool(
+        "get_adjuster_info",
+        "Retrieve the adjuster assigned to a claim.",
+        ClaimNumberArgs,
+        _get_adjuster,
+        requires_verification=True,
+        agents=CLAIMS_AGENTS,
+    ),
+    Tool(
+        "create_claim",
+        "File a simulated first notice of loss.",
+        CreateClaimArgs,
+        _create_claim,
+        requires_verification=True,
+        agents=CLAIMS_AGENTS,
+    ),
+    Tool(
+        "add_claim_information",
+        "Attach additional information to a claim.",
+        AddClaimInfoArgs,
+        _add_claim_information,
+        requires_verification=True,
+        agents=CLAIMS_AGENTS,
+    ),
+    Tool(
+        "escalate_claim_dispute",
+        "Open a dispute review on a claim.",
+        ClaimNumberArgs,
+        _dispute_claim,
+        requires_verification=True,
+        agents=CLAIMS_AGENTS,
+    ),
 ):
     register(_tool)

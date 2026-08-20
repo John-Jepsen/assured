@@ -20,15 +20,19 @@ log = get_logger("api")
 async def lifespan(app: FastAPI):
     configure_logging()
     load_all_tools()
-    log.info("startup", version=__version__, providers={
-        "llm": get_settings().llm_provider, "stt": get_settings().stt_provider,
-        "tts": get_settings().tts_provider,
-    })
+    log.info(
+        "startup",
+        version=__version__,
+        providers={
+            "llm": get_settings().llm_provider,
+            "stt": get_settings().stt_provider,
+            "tts": get_settings().tts_provider,
+        },
+    )
     yield
 
 
 def create_app() -> FastAPI:
-    settings = get_settings()
     app = FastAPI(
         title="Assured — Multimodal Voice-to-Voice Insurance AI",
         version=__version__,
