@@ -128,6 +128,36 @@ Startup is **readiness-gated** (health checks + `depends_on: service_healthy`), 
 timed sleeps. Copy `.env.example` → `.env` only if you want to enable optional
 providers (external LLM, Stripe test, Twilio).
 
+### …with real open models (one command, no keys)
+
+The base command above runs on mock/local providers so it works anywhere. To run with
+a **real open-source LLM and real semantic embeddings** baked into the stack — no API
+keys, no manual downloads — add the models overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.models.yml up --build
+```
+
+This adds an **Ollama** sidecar and, on first boot, pulls a small instruct model
+(`qwen2.5:0.5b`, ~400 MB) and an embedding model (`nomic-embed-text`, ~270 MB) into a
+persistent volume — **downloaded once, reused after** (spec: model cache, no re-download
+on restart). The API is auto-configured to use them (`llm=ollama`, `embedding=ollama`,
+semantic retrieval threshold tuned for the model). CPU-only friendly.
+
+Pick different models without editing files:
+
+```bash
+OLLAMA_LLM=llama3.2:1b OLLAMA_EMBED=nomic-embed-text \
+  docker compose -f docker-compose.yml -f docker-compose.models.yml up --build
+```
+
+Ollama can also pull models **directly from Hugging Face** (GGUF), e.g.
+`OLLAMA_LLM=hf.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M`.
+
+> Verified on the host: the same adapter drives a real Ollama model end-to-end (grounded
+> `$500` deductible answer) and real `nomic-embed-text` embeddings pass all 38 eval cases
+> with clean relevance separation (in-domain ≈0.75–0.85 vs off-topic ≈0.4–0.47).
+
 ---
 
 ## Local setup (no Docker)

@@ -1,0 +1,62 @@
+# Overlay: run the demo with REAL open models (no API keys, no manual downloads).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.models.yml up --build
+#
+# Adds an Ollama sidecar, pulls a small instruct LLM + an embedding model on first
+# boot (cached in a named volume — pulled once, reused after), and points the API at
+# them. First run downloads ~0.9 GB; later runs are instant. CPU-only friendly.
+#
+# Models (both open, obtainable from Ollama / Hugging Face):
+#   - LLM:        qwen2.5:0.5b        (~400 MB, instruct)  → set OLLAMA_LLM to change
+#   - Embeddings: nomic-embed-text    (~270 MB, 768-dim)   → real semantic retrieval
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollamadata:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # One-shot: pull the models, then exit. API waits for this to complete.
+  model-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "ollama:11434"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        ollama pull ${OLLAMA_LLM:-qwen2.5:0.5b} &&
+        ollama pull ${OLLAMA_EMBED:-nomic-embed-text} &&
+        echo 'models ready'
+    restart: "no"
+
+  api:
+    environment:
+      INSURANCE_AI_LLM_PROVIDER: ollama
+      INSURANCE_AI_LLM_MODEL: "${OLLAMA_LLM:-qwen2.5:0.5b}"
+      INSURANCE_AI_OLLAMA_BASE_URL: http://ollama:11434
+      INSURANCE_AI_EMBEDDING_PROVIDER: ollama
+      INSURANCE_AI_EMBEDDING_MODEL: "${OLLAMA_EMBED:-nomic-embed-text}"
+      INSURANCE_AI_EMBEDDING_DIM: "768"
+      INSURANCE_AI_VECTOR_BACKEND: numpy
+      # Semantic (dense) similarity has a higher baseline than BM25 — nomic separates
+      # relevant (~0.75-0.85) from off-topic (~0.4-0.47), so 0.6 is the right cutoff.
+      INSURANCE_AI_RAG_MIN_SCORE: "0.6"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      model-init:
+        condition: service_completed_successfully
+
+volumes:
+  ollamadata:

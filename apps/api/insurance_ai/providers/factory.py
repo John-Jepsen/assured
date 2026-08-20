@@ -80,6 +80,10 @@ def build_embedding(settings: Settings) -> EmbeddingProvider:
         from insurance_ai.providers.openai_compat import OpenAIEmbedding
 
         return OpenAIEmbedding(settings)
+    if settings.embedding_provider == "ollama":
+        from insurance_ai.providers.openai_compat import OllamaEmbedding
+
+        return OllamaEmbedding(settings)
     raise ValueError(f"Unknown embedding_provider: {settings.embedding_provider}")
 
 

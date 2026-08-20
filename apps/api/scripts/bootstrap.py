@@ -34,19 +34,24 @@ async def main(knowledge_dir: Path, if_empty: bool = False) -> None:
     await create_schema(engine)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
+        counts = None
         if if_empty:
             existing = await db.scalar(select(func.count()).select_from(Customer))
             if existing:
                 log.info("seed_skipped", reason="already_seeded", customers=int(existing))
-                await engine.dispose()
-                print(f"Schema ready; {existing} customers already present (skipped seeding).")
-                return
-        counts = await seed(db)
-        log.info("seeded", **counts)
+            else:
+                counts = await seed(db)
+                log.info("seeded", **counts)
+        else:
+            counts = await seed(db)
+            log.info("seeded", **counts)
+        # Always (re)ingest so the stored embeddings match the CURRENT embedding
+        # provider/dimension — switching providers (e.g. hash → nomic) re-embeds cleanly.
         rag = await ingest_directory(db, knowledge_dir, get_providers().embedding)
-        log.info("ingested", **rag)
+        log.info("ingested", provider=get_providers().embedding.name, **rag)
     await engine.dispose()
-    print(f"Bootstrap complete: {counts} seeded, {rag} ingested from {knowledge_dir}")
+    print(f"Bootstrap complete: seed={counts or 'skipped'}, ingested {rag} "
+          f"with '{get_providers().embedding.name}' embeddings.")
 
 
 if __name__ == "__main__":

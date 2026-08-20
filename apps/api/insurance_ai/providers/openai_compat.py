@@ -94,3 +94,18 @@ class OpenAIEmbedding(EmbeddingProvider):
             )
             r.raise_for_status()
             return [item["embedding"] for item in r.json()["data"]]
+
+
+class OllamaEmbedding(OpenAIEmbedding):
+    """Embeddings from a local Ollama server via its OpenAI-compatible endpoint.
+
+    Enables real semantic retrieval (e.g. nomic-embed-text) with zero API keys — the
+    "easy real models" Docker profile uses this alongside an Ollama LLM.
+    """
+
+    name = "ollama"
+
+    def __init__(self, settings) -> None:  # noqa: ANN001
+        super().__init__(settings)
+        self.base_url = settings.ollama_base_url.rstrip("/") + "/v1"
+        self.api_key = "ollama"

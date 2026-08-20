@@ -34,6 +34,13 @@ All notable changes to this project are documented here.
 - **Docs**: architecture, security, voice-pipeline, rag, agent-system, evaluation,
   and ADRs (agent framework, models/speech, telephony).
 
+### Added (real-models profile)
+- `docker-compose.models.yml` overlay: one-command real open models via an **Ollama**
+  sidecar (LLM + `nomic-embed-text` embeddings) with a persistent model cache. No API
+  keys, CPU-friendly. `ollama` embedding provider added; bootstrap re-embeds on provider
+  change. Verified end-to-end on the host (grounded answers + 38/38 evals with semantic
+  retrieval).
+
 ### Notes
-- Lexical (BM25) retrieval is the offline default; configure sentence-transformers
-  embeddings for stronger semantic relevance on paraphrased/off-topic queries.
+- Lexical (BM25) retrieval is the offline default; the models profile switches to dense
+  semantic embeddings (nomic) with a model-appropriate relevance threshold (0.6).
