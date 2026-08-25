@@ -118,6 +118,29 @@ _INTENT_RULES: dict[str, tuple[AgentName, list[str]]] = {
     ),
 }
 
+# Short yes/no replies used to answer a pending confirmation (e.g. a payment prompt).
+# They carry no entity of their own, so routing relies on the session's pending state.
+_AFFIRM_RE = re.compile(
+    r"\b(yes|yeah|yep|yup|confirm(ed)?|go ahead|do it|sure|ok(ay)?|proceed|correct"
+    r"|pay it|pay now)\b",
+    re.IGNORECASE,
+)
+_DECLINE_RE = re.compile(
+    r"\b(no|nope|nah|cancel|never ?mind|stop|don'?t|do not|hold on|not now)\b",
+    re.IGNORECASE,
+)
+
+
+def is_affirmative(message: str) -> bool:
+    """True when a message reads as a bare 'yes' answering a prior confirmation."""
+    return bool(_AFFIRM_RE.search(message))
+
+
+def is_decline(message: str) -> bool:
+    """True when a message reads as a bare 'no' answering a prior confirmation."""
+    return bool(_DECLINE_RE.search(message))
+
+
 _POLICY_RE = re.compile(r"\b([A-Z]{3,5}-\d{4,6})\b", re.IGNORECASE)
 _CLAIM_RE = re.compile(r"\bCLAIM-\d{4,6}\b", re.IGNORECASE)
 _INVOICE_RE = re.compile(r"\bINV-[A-Z0-9-]+\b", re.IGNORECASE)
@@ -214,8 +237,13 @@ def detect(text: str) -> IntentResult:
         )
 
     ordered = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
-    top_score = ordered[0][1]
-    # multi-intent: keep intents within 1 point of the top and above 0
+    # The routing threshold is driven by the strongest *specialist* signal, so the
+    # generic question-form words in "general" ("what is", "how do i", "what does")
+    # cannot crowd out genuine specialist intents in a natural multi-part question
+    # (e.g. "what does auto cover, how do I file a claim, and what's my balance?").
+    specialist_top = max((s for i, s in scores.items() if i != "general"), default=0)
+    top_score = specialist_top or ordered[0][1]
+    # multi-intent: keep intents within 1 point of the (specialist) top and above 0
     selected = [i for i, s in ordered if s >= max(1, top_score - 1)]
     # "general" is a fallback. Drop it only when the message carries account context
     # (a policy/claim/invoice id, or "my ..."), so account-specific asks lead with a

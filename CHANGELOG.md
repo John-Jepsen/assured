@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **Payments — confirm-before-charge now completes across turns.** A payment request
+  asks to confirm and remembers the pending charge on the session; a plain "yes" on
+  the next turn completes it (routed to billing) and "no" cancels it. Previously the
+  follow-up "yes" fell through to the general agent and the payment never happened.
+- **Payments — politeness no longer auto-charges.** "Please pay invoice …" asks for
+  confirmation instead of charging immediately; only an explicit confirmation turn
+  charges.
+- **Routing — natural multi-part questions reach every specialist.** Generic question
+  words ("what is", "how do i", "what does") no longer crowd out real policy/claims/
+  billing intents; the routing threshold is driven by the strongest specialist signal.
+- **Voice — Mic button reflects secure-context requirement.** Browser voice input is
+  gated on `window.isSecureContext` (https/localhost), so it is not shown as available
+  when served over http from a LAN IP, where the Web Speech API cannot run.
+
 ## [0.1.0] — Initial build
 
 ### Added

@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from insurance_ai.agents.composer import compose
-from insurance_ai.agents.intent import detect
+from insurance_ai.agents.intent import detect, is_affirmative, is_decline
 from insurance_ai.agents.specialists import SPECIALISTS
 from insurance_ai.config import get_settings
 from insurance_ai.domain.enums import AgentName, VerificationStatus
@@ -133,6 +133,12 @@ class Orchestrator:
         t0 = time.perf_counter()
         trace = Trace(request_id=request_id, conversation_id=session.conversation_id)
         intent = detect(message)
+        # A bare "yes"/"no" answering a pending "shall I confirm this payment?" carries no
+        # entity of its own and would otherwise route to the general agent. When a payment
+        # is awaiting confirmation, hand such replies to billing so it completes or cancels.
+        if session.pending_payment and (is_affirmative(message) or is_decline(message)):
+            intent.intents = ["billing"]
+            intent.agents = [AgentName.BILLING]
         trace.intents = intent.intents
         trace.agents = [a.value for a in intent.agents]
         trace.verification_status = session.verification_status

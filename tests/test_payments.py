@@ -33,13 +33,16 @@ async def test_make_payment_requires_confirmation_then_pays(db, new_session):
     ctx = ToolContext(session=sess, db=db)
     tool = get_tool("make_payment")
 
-    # Without confirm=true it must not charge — it asks to confirm.
+    # Without confirm=true it must not charge — it asks to confirm and remembers the
+    # pending charge on the session so a later "yes" can complete this exact payment.
     pending = await tool.run(ctx, {"invoice_number": "INV-AUTO-10024-07"})
     assert pending.ok and pending.data.get("requires_confirmation") is True
+    assert sess.pending_payment == {"invoice_number": "INV-AUTO-10024-07", "amount": 142.50}
 
-    # With confirm=true it charges via the mock provider (TEST MODE).
+    # With confirm=true it charges via the mock provider (TEST MODE) and clears pending.
     paid = await tool.run(ctx, {"invoice_number": "INV-AUTO-10024-07", "confirm": True})
     assert paid.ok
+    assert sess.pending_payment is None
     assert paid.data["test_mode"] is True
     assert paid.data["new_status"] in ("paid", "pending")
 

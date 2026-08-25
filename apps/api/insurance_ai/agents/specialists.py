@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from insurance_ai.agents.base import AgentTurn, PlannedCall, Specialist
-from insurance_ai.agents.intent import IntentResult, infer_product
+from insurance_ai.agents.intent import IntentResult, infer_product, is_affirmative, is_decline
 from insurance_ai.domain.enums import AgentName
 from insurance_ai.tools.base import ToolContext
 
@@ -183,9 +183,27 @@ class BillingAgent(Specialist):
         m = message.lower()
         pol = intent.entities.policy_numbers[0] if intent.entities.policy_numbers else None
         inv = intent.entities.invoice_numbers[0] if intent.entities.invoice_numbers else None
+        pending = ctx.session.pending_payment
+        # Answering a prior "shall I confirm this payment?": a plain "yes" completes the
+        # remembered charge; a "no" cancels it (acknowledged in post_process).
+        if pending and not inv:
+            if is_affirmative(message):
+                args: dict[str, object] = {
+                    "invoice_number": pending["invoice_number"],
+                    "confirm": True,
+                }
+                if pending.get("amount") is not None:
+                    args["amount"] = pending["amount"]
+                calls.append(PlannedCall("make_payment", args))
+                return calls
+            if is_decline(message):
+                ctx.session.pending_payment = None
+                return calls
         if inv and re.search(r"pay|make a payment", m):
-            confirm = bool(re.search(r"\b(yes|confirm|go ahead|do it|please)\b", m))
-            args = {"invoice_number": inv, "confirm": confirm}
+            # The initial request always asks to confirm first (never auto-charges, not
+            # even on "please"); make_payment records the pending charge and the caller's
+            # "yes" on the next turn completes it via the pending path above.
+            args = {"invoice_number": inv, "confirm": False}
             if intent.entities.amounts:
                 args["amount"] = intent.entities.amounts[0]
             calls.append(PlannedCall("make_payment", args))
@@ -204,6 +222,13 @@ class BillingAgent(Specialist):
 
     def post_process(self, turn, message, intent):
         m = message.lower()
+        # A bare "no" reaches billing only when it cancels a pending payment (routed here
+        # by the orchestrator); acknowledge it instead of falling through to a clarification.
+        if not turn.tool_calls and is_decline(message) and not is_affirmative(message):
+            turn.clarification = (
+                "No problem — I won't process that payment. Is there anything else I can help with?"
+            )
+            return
         if (
             re.search(r"pay|payment|balance|premium", m)
             and not intent.entities.policy_numbers

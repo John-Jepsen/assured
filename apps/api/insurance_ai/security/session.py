@@ -8,6 +8,7 @@ at most one customer — cross-customer access is impossible by construction.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from insurance_ai.domain.enums import VerificationStatus
 
@@ -21,6 +22,10 @@ class Session:
     # factors the caller has satisfied this session (audit trail, non-secret labels)
     satisfied_factors: list[str] = field(default_factory=list)
     escalated: bool = False
+    # A payment awaiting the caller's confirmation, carried across turns so a plain
+    # "yes" completes it. Set when make_payment asks to confirm; cleared once the
+    # charge is attempted or the caller declines. Shape: {"invoice_number", "amount"}.
+    pending_payment: dict[str, Any] | None = None
 
     @property
     def is_verified(self) -> bool:

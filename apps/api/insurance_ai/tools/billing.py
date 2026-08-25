@@ -94,7 +94,12 @@ async def _make_payment(ctx: ToolContext, args: MakePaymentArgs) -> ToolResult:
             "amount_too_high", f"Amount ${amount:.2f} exceeds the balance of ${balance:.2f}."
         )
     if not args.confirm:
-        # Sensitive action — require explicit confirmation before charging.
+        # Sensitive action — require explicit confirmation before charging. Remember it
+        # on the session so a plain "yes" on the next turn completes this exact payment.
+        ctx.session.pending_payment = {
+            "invoice_number": invoice.invoice_number,
+            "amount": round(amount, 2),
+        }
         return ToolResult.success(
             {
                 "requires_confirmation": True,
@@ -108,6 +113,8 @@ async def _make_payment(ctx: ToolContext, args: MakePaymentArgs) -> ToolResult:
             ),
         )
 
+    # A confirmed charge resolves any pending confirmation for this session.
+    ctx.session.pending_payment = None
     provider = get_payment_provider()
     result = await provider.charge(amount, "usd", f"Premium payment {invoice.invoice_number}")
     payment = Payment(

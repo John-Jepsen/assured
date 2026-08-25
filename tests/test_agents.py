@@ -72,6 +72,65 @@ async def test_inline_verification_then_answer(db, new_session):
     assert "verified" in res.answer.lower()
 
 
+def test_multi_intent_survives_generic_question_words():
+    # Natural multi-part phrasing: the generic "what does / how do i / what is" words
+    # must not crowd out the real policy + claim + billing specialists.
+    result = detect(
+        "What does auto liability cover, and how do I file a claim, "
+        "and what is my balance on AUTO-10024?"
+    )
+    assert AgentName.POLICY in result.agents
+    assert AgentName.CLAIMS in result.agents
+    assert AgentName.BILLING in result.agents
+
+
+def test_terminology_still_reaches_general():
+    # A pure terminology question with no account context keeps the general agent.
+    assert AgentName.GENERAL in detect("What does deductible mean?").agents
+
+
+@pytest.mark.asyncio
+async def test_payment_confirmation_completes_across_turns(db, new_session):
+    orch = Orchestrator()
+    sess = new_session()
+    await _verify(db, sess)
+    # Turn 1: asks to confirm, remembers the pending charge — does not charge yet.
+    ask = await _run(orch, db, sess, "Pay invoice INV-AUTO-10024-07.")
+    assert "confirm" in ask.answer.lower()
+    assert sess.pending_payment and sess.pending_payment["invoice_number"] == "INV-AUTO-10024-07"
+    # Turn 2: a bare "yes" completes that exact payment via the billing agent.
+    done = await _run(orch, db, sess, "yes")
+    assert "billing" in done.trace.agents
+    assert any(t["tool_name"] == "make_payment" and t["ok"] for t in done.trace.tool_calls)
+    assert sess.pending_payment is None
+
+
+@pytest.mark.asyncio
+async def test_payment_decline_cancels_pending(db, new_session):
+    orch = Orchestrator()
+    sess = new_session()
+    await _verify(db, sess)
+    await _run(orch, db, sess, "Pay invoice INV-AUTO-10024-07.")
+    res = await _run(orch, db, sess, "no")
+    assert sess.pending_payment is None
+    assert "won't process" in res.answer.lower()
+    # The invoice was never charged.
+    assert not any(t["tool_name"] == "make_payment" for t in res.trace.tool_calls)
+
+
+@pytest.mark.asyncio
+async def test_politeness_never_auto_charges(db, new_session):
+    orch = Orchestrator()
+    sess = new_session()
+    await _verify(db, sess)
+    # "please" must not confirm the charge — it only asks and waits for a real "yes".
+    res = await _run(orch, db, sess, "Please pay invoice INV-AUTO-10024-07.")
+    assert "confirm" in res.answer.lower()
+    assert sess.pending_payment is not None
+    make_payment_calls = [t for t in res.trace.tool_calls if t["tool_name"] == "make_payment"]
+    assert make_payment_calls and make_payment_calls[0]["arguments"].get("confirm") is False
+
+
 @pytest.mark.asyncio
 async def test_multi_intent_coordination(db, new_session):
     orch = Orchestrator()

@@ -50,7 +50,14 @@ export function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
 }
 
 export function isSpeechRecognitionAvailable(): boolean {
-  return getSpeechRecognitionCtor() !== null;
+  // The constructor exists in Chrome even on insecure origins, but the Web Speech API
+  // only actually runs in a secure context (https or localhost) — otherwise start()
+  // fires a "not-allowed" error. Gate the Mic button on both so it never looks live
+  // when it can't be (e.g. the app served over http:// from a LAN IP).
+  if (getSpeechRecognitionCtor() === null) {
+    return false;
+  }
+  return typeof window !== "undefined" && window.isSecureContext === true;
 }
 
 /**

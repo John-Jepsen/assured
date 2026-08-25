@@ -488,7 +488,7 @@ export default function CustomerPage() {
                 ? voice.listening
                   ? "Stop listening"
                   : "Start voice input"
-                : "Voice input needs a Chromium/Safari browser or server STT"
+                : "Voice input needs a Chromium/Safari browser on a secure origin (https or localhost)"
             }
             aria-pressed={voice.listening}
           >
