@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from insurance_ai.agents.base import AgentTurn, PlannedCall, Specialist
-from insurance_ai.agents.intent import IntentResult, infer_product, is_affirmative, is_decline
+from insurance_ai.agents.intent import IntentResult, infer_product, reply_polarity
 from insurance_ai.domain.enums import AgentName
 from insurance_ai.tools.base import ToolContext
 
@@ -184,10 +184,13 @@ class BillingAgent(Specialist):
         pol = intent.entities.policy_numbers[0] if intent.entities.policy_numbers else None
         inv = intent.entities.invoice_numbers[0] if intent.entities.invoice_numbers else None
         pending = ctx.session.pending_payment
-        # Answering a prior "shall I confirm this payment?": a plain "yes" completes the
-        # remembered charge; a "no" cancels it (acknowledged in post_process).
+        # Answering a prior "shall I confirm this payment?": a bare "yes" completes the
+        # remembered charge; a bare "no" cancels it (acknowledged in post_process). Only
+        # bare replies reach here — the orchestrator has already expired the pending state
+        # for anything that carries other content.
         if pending and not inv:
-            if is_affirmative(message):
+            polarity = reply_polarity(message)
+            if polarity == "affirm":
                 args: dict[str, object] = {
                     "invoice_number": pending["invoice_number"],
                     "confirm": True,
@@ -196,7 +199,7 @@ class BillingAgent(Specialist):
                     args["amount"] = pending["amount"]
                 calls.append(PlannedCall("make_payment", args))
                 return calls
-            if is_decline(message):
+            if polarity == "decline":
                 ctx.session.pending_payment = None
                 return calls
         if inv and re.search(r"pay|make a payment", m):
@@ -224,7 +227,7 @@ class BillingAgent(Specialist):
         m = message.lower()
         # A bare "no" reaches billing only when it cancels a pending payment (routed here
         # by the orchestrator); acknowledge it instead of falling through to a clarification.
-        if not turn.tool_calls and is_decline(message) and not is_affirmative(message):
+        if not turn.tool_calls and reply_polarity(message) == "decline":
             turn.clarification = (
                 "No problem — I won't process that payment. Is there anything else I can help with?"
             )

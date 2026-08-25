@@ -132,6 +132,51 @@ async def test_politeness_never_auto_charges(db, new_session):
 
 
 @pytest.mark.asyncio
+async def test_loose_affirmative_word_does_not_charge(db, new_session):
+    # "sure, but first, what is the balance?" contains "sure" but is NOT a bare yes —
+    # it must never be treated as confirming the pending payment.
+    orch = Orchestrator()
+    sess = new_session()
+    await _verify(db, sess)
+    await _run(orch, db, sess, "Pay invoice INV-AUTO-10024-07.")
+    res = await _run(orch, db, sess, "sure, but first, what is my balance on AUTO-10024?")
+    assert not any(
+        t["tool_name"] == "make_payment" and t["arguments"].get("confirm")
+        for t in res.trace.tool_calls
+    )
+    # The pending charge expires once the caller moves on without a bare yes/no.
+    assert sess.pending_payment is None
+
+
+@pytest.mark.asyncio
+async def test_stale_pending_payment_expires_before_later_yes(db, new_session):
+    # A "yes" on a later, unrelated turn must not complete a stale charge.
+    orch = Orchestrator()
+    sess = new_session()
+    await _verify(db, sess)
+    await _run(orch, db, sess, "Pay invoice INV-AUTO-10024-07.")
+    # Turn 2 pivots topic without answering → pending expires.
+    await _run(orch, db, sess, "What does my auto policy cover?")
+    assert sess.pending_payment is None
+    # Turn 3 affirms an unrelated point → no charge, because nothing is pending.
+    res = await _run(orch, db, sess, "yes, thanks")
+    assert not any(t["tool_name"] == "make_payment" for t in res.trace.tool_calls)
+
+
+@pytest.mark.asyncio
+async def test_affirmative_with_other_intent_preserves_that_intent(db, new_session):
+    # "yes — actually, I want to speak to a human" must escalate, not silently charge.
+    orch = Orchestrator()
+    sess = new_session()
+    await _verify(db, sess)
+    await _run(orch, db, sess, "Pay invoice INV-AUTO-10024-07.")
+    res = await _run(orch, db, sess, "yes — actually, I want to speak to a human.")
+    assert res.trace.escalated
+    assert any(t["tool_name"] == "transfer_to_human" for t in res.trace.tool_calls)
+    assert not any(t["tool_name"] == "make_payment" for t in res.trace.tool_calls)
+
+
+@pytest.mark.asyncio
 async def test_multi_intent_coordination(db, new_session):
     orch = Orchestrator()
     sess = new_session()

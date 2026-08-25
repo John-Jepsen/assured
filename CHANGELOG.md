@@ -12,6 +12,12 @@ All notable changes to this project are documented here.
 - **Payments — politeness no longer auto-charges.** "Please pay invoice …" asks for
   confirmation instead of charging immediately; only an explicit confirmation turn
   charges.
+- **Payments — confirmation fails closed.** Only a *bare* yes/no completes or cancels a
+  pending charge; a reply that carries any other content ("sure, but first, what's my
+  balance?") never charges, an ambiguous "yes, but wait" cancels, a pending charge
+  expires the moment the caller changes topic (so a stray later "yes" can't complete a
+  stale invoice), and an affirmative that also asks for something else (e.g. a human)
+  keeps that request instead of dropping it.
 - **Routing — natural multi-part questions reach every specialist.** Generic question
   words ("what is", "how do i", "what does") no longer crowd out real policy/claims/
   billing intents; the routing threshold is driven by the strongest specialist signal.

@@ -119,26 +119,100 @@ _INTENT_RULES: dict[str, tuple[AgentName, list[str]]] = {
 }
 
 # Short yes/no replies used to answer a pending confirmation (e.g. a payment prompt).
-# They carry no entity of their own, so routing relies on the session's pending state.
+# A reply only counts when the WHOLE message is a bare answer — every word is a known
+# yes/no/filler token and the message is short — so substantive messages that merely
+# contain "ok"/"sure"/"correct" (e.g. "sure, but first, what's my balance?") are never
+# mistaken for a confirmation. Money-moving confirmations must fail closed.
 _AFFIRM_RE = re.compile(
-    r"\b(yes|yeah|yep|yup|confirm(ed)?|go ahead|do it|sure|ok(ay)?|proceed|correct"
-    r"|pay it|pay now)\b",
+    r"\b(yes|yeah|yep|yup|yea|confirm(ed|s)?|sure|ok(ay)?|proceed|correct|absolutely"
+    r"|definitely|affirmative|go ahead|do it|pay (it|now))\b",
     re.IGNORECASE,
 )
 _DECLINE_RE = re.compile(
-    r"\b(no|nope|nah|cancel|never ?mind|stop|don'?t|do not|hold on|not now)\b",
+    r"\b(no|nope|nah|cancel(l?ed)?|stop|dont|do not|wait|never ?mind|hold on|not now)\b",
     re.IGNORECASE,
 )
+# Vocabulary permitted in a *bare* reply. If any word falls outside this set the message
+# carries real content (a question, another request) and is not a confirmation.
+_REPLY_VOCAB = frozenset(
+    {
+        # affirmations
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "yea",
+        "confirm",
+        "confirmed",
+        "confirms",
+        "sure",
+        "ok",
+        "okay",
+        "k",
+        "proceed",
+        "correct",
+        "absolutely",
+        "definitely",
+        "affirmative",
+        "go",
+        "ahead",
+        "do",
+        "it",
+        "pay",
+        "now",
+        # declines
+        "no",
+        "nope",
+        "nah",
+        "cancel",
+        "canceled",
+        "cancelled",
+        "stop",
+        "dont",
+        "wait",
+        "not",
+        "never",
+        "mind",
+        "nevermind",
+        "hold",
+        "on",
+        # neutral filler
+        "please",
+        "thanks",
+        "thank",
+        "you",
+        "just",
+        "that",
+        "thats",
+        "then",
+    }
+)
+_MAX_REPLY_WORDS = 5
 
 
-def is_affirmative(message: str) -> bool:
-    """True when a message reads as a bare 'yes' answering a prior confirmation."""
-    return bool(_AFFIRM_RE.search(message))
+def reply_polarity(message: str) -> str | None:
+    """Classify a *bare* yes/no answer to a pending confirmation.
 
-
-def is_decline(message: str) -> bool:
-    """True when a message reads as a bare 'no' answering a prior confirmation."""
-    return bool(_DECLINE_RE.search(message))
+    Returns "affirm", "decline", or None. Only short messages made entirely of known
+    yes/no/filler words qualify, so a message with any substantive content is None (the
+    caller then treats the pending confirmation as unanswered). Ambiguous replies that
+    read as both yes and no (e.g. "yes, but wait") fail closed to "decline".
+    """
+    text = re.sub(r"[^\w\s]", " ", message.lower().replace("'", "")).strip()
+    if not text:
+        return None
+    words = text.split()
+    if len(words) > _MAX_REPLY_WORDS or not all(w in _REPLY_VOCAB for w in words):
+        return None
+    affirm = bool(_AFFIRM_RE.search(text))
+    decline = bool(_DECLINE_RE.search(text))
+    if affirm and decline:
+        return "decline"  # fail closed on ambiguity — never charge on a mixed reply
+    if affirm:
+        return "affirm"
+    if decline:
+        return "decline"
+    return None
 
 
 _POLICY_RE = re.compile(r"\b([A-Z]{3,5}-\d{4,6})\b", re.IGNORECASE)
