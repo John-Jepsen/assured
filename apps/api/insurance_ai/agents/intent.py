@@ -215,7 +215,8 @@ def reply_polarity(message: str) -> str | None:
     return None
 
 
-_POLICY_RE = re.compile(r"\b([A-Z]{3,5}-\d{4,6})\b", re.IGNORECASE)
+# Prefix is 3-6 letters: covers AUTO/HOME/LIFE/RENT/COMM/UMB and HEALTH (6 letters).
+_POLICY_RE = re.compile(r"\b([A-Z]{3,6}-\d{4,6})\b", re.IGNORECASE)
 _CLAIM_RE = re.compile(r"\bCLAIM-\d{4,6}\b", re.IGNORECASE)
 _INVOICE_RE = re.compile(r"\bINV-[A-Z0-9-]+\b", re.IGNORECASE)
 _ZIP_RE = re.compile(r"\b(\d{5})\b")

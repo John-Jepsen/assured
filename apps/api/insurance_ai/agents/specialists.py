@@ -17,12 +17,6 @@ _GUARDRAIL = (
 )
 
 
-def _policy_hint(intent: IntentResult, ctx: ToolContext) -> str | None:
-    if intent.entities.policy_numbers:
-        return intent.entities.policy_numbers[0]
-    return None
-
-
 async def _resolve_single_policy(ctx: ToolContext, product: str | None) -> str | None:
     """For a verified session with no explicit policy, resolve the one relevant policy.
 
@@ -88,6 +82,19 @@ def _snippet(text: str, max_chars: int = 260) -> str:
     return (cut[: last + 1] if last > 60 else cut).strip() + " …"
 
 
+# A general "how does X work / what is X / what happens if X" question, as opposed to a
+# lookup of the caller's own record. These are answered from documentation, not account
+# data, so a specialist that owns the topic still grounds them via the knowledge base.
+_CONCEPTUAL_RE = re.compile(
+    r"\bhow (do|does|can|to|long|much)\b|\bwhat (is|are|does|happens|if)\b|"
+    r"\bexplain\b|\bdifference\b|\bwork(s)?\b|\bmean(s)?\b|\bwhy\b|\bin general\b|\btypically\b"
+)
+
+
+def _is_conceptual(message: str) -> bool:
+    return bool(_CONCEPTUAL_RE.search(message.lower()))
+
+
 class PolicyAgent(Specialist):
     name = AgentName.POLICY
     system_prompt = (
@@ -96,29 +103,37 @@ class PolicyAgent(Specialist):
     )
 
     async def augment(self, ctx: ToolContext, message: str, intent: IntentResult) -> None:
-        if not intent.entities.policy_numbers and re.search(
-            r"cover|deductible|limit|exclusion|renew|my policy|add|remove|change|update"
-            r"|driver|vehicle",
-            message.lower(),
-        ):
-            resolved = await _resolve_single_policy(ctx, infer_product(message))
+        if intent.entities.policy_numbers:
+            return
+        m = message.lower()
+        product = infer_product(message)
+        # A change request targets one policy (the single relevant one); coverage/renewal
+        # questions resolve *every* relevant policy so a multi-policy household sees each
+        # instead of a "which policy?" prompt.
+        coverage_terms = r"cover|deductible|limit|exclusion|renew|my policy|driver|dwelling|asset"
+        if re.search(r"\b(add|remove|change|update)\b", m):
+            resolved = await _resolve_single_policy(ctx, product)
             if resolved:
                 intent.entities.policy_numbers.append(resolved)
+        elif re.search(coverage_terms, m):
+            intent.entities.policy_numbers.extend(await _resolve_customer_policies(ctx, product))
 
     def plan(self, message: str, intent: IntentResult, ctx: ToolContext) -> list[PlannedCall]:
         calls: list[PlannedCall] = []
-        pol = _policy_hint(intent, ctx)
         m = message.lower()
         coverage_q = bool(re.search(r"cover|deductible|limit|exclusion", m))
-        # Specific policy facts lead the answer; general documentation grounds it after.
-        if pol:
+        asset_q = bool(re.search(r"vehicle|asset|driver|dwelling|insured", m))
+        change_q = bool(re.search(r"change|add|remove|update .*(vehicle|driver)", m))
+        pols = intent.entities.policy_numbers
+        # Specific policy facts lead the answer (one lookup per relevant policy).
+        for pol in pols:
             if coverage_q:
                 calls.append(PlannedCall("lookup_coverages", {"policy_number": pol}))
-            elif re.search(r"vehicle|asset|driver|dwelling|insured", m):
+            elif asset_q:
                 calls.append(PlannedCall("lookup_insured_assets", {"policy_number": pol}))
             else:
                 calls.append(PlannedCall("lookup_policy", {"policy_number": pol}))
-            if re.search(r"change|add|remove|update .*(vehicle|driver)", m):
+            if change_q:
                 calls.append(
                     PlannedCall(
                         "request_policy_change",
@@ -130,10 +145,12 @@ class PolicyAgent(Specialist):
                     )
                 )
         # Supplementary documentation — skip it when the customer's own coverage record
-        # already answers the question, so a doc-search "miss" never tails a concrete answer.
-        answered_from_policy = bool(pol) and coverage_q
-        if not answered_from_policy and re.search(
-            r"cover|rental|deductible|limit|exclusion|glass|windshield|tow", m
+        # already answers the question (so a doc "miss" never tails a concrete answer), but
+        # always ground a general "how does X work / what is X" question from the docs.
+        answered_from_policy = bool(pols) and coverage_q
+        if not answered_from_policy and (
+            re.search(r"cover|rental|deductible|limit|exclusion|glass|windshield|tow", m)
+            or _is_conceptual(message)
         ):
             calls.append(
                 PlannedCall(
@@ -294,7 +311,16 @@ class BillingAgent(Specialist):
             )
             for p in intent.entities.policy_numbers:
                 calls.append(PlannedCall(tool, {"policy_number": p}))
-        if re.search(r"why .*(increase|went up|higher|more)", m):
+        # Ground general billing questions ("what happens if I miss a payment?", "how does
+        # autopay work?") from the docs — but not when a specific balance/payment lookup
+        # already answered, so a doc "miss" never tails a concrete number.
+        did_billing_lookup = bool(calls)
+        concept_q = _is_conceptual(message) or bool(
+            re.search(r"grace|late fee|lapse|reinstat|refund|autopay|billing cycle|paperless", m)
+        )
+        if re.search(r"why .*(increase|went up|higher|more)", m) or (
+            not did_billing_lookup and concept_q
+        ):
             calls.append(PlannedCall("search_knowledge", {"query": message, "category": "billing"}))
         return calls
 
@@ -311,8 +337,17 @@ class BillingAgent(Specialist):
                 "No problem — I won't process that payment. Is there anything else I can help with?"
             )
             return
+        # Account-specific billing question from an unverified caller → prompt to verify
+        # rather than ask which policy.
         if (
-            re.search(r"pay|payment|balance|premium", m)
+            re.search(r"my (balance|payment|premium|bill|autopay)|what.*i owe", m)
+            and not ctx.session.is_verified
+        ):
+            turn.needs_verification = True
+            return
+        if (
+            not turn.tool_calls
+            and re.search(r"pay|payment|balance|premium", m)
             and not intent.entities.policy_numbers
             and not intent.entities.invoice_numbers
             and not turn.needs_verification
