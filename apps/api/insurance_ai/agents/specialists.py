@@ -95,6 +95,42 @@ def _is_conceptual(message: str) -> bool:
     return bool(_CONCEPTUAL_RE.search(message.lower()))
 
 
+# Bare greetings / small talk / acknowledgements — answered with a welcome, not a
+# documentation search that would "miss" and look broken.
+_GREETING_RE = re.compile(
+    r"^\s*(?:(?:hi|hey+|hello|howdy|yo|sup|greetings|good (?:morning|afternoon|evening)|"
+    r"thanks|thank you|thx|ty|ok|okay|k|cool|great|nice|got it|nvm|there|again|folks|team)"
+    r"\b[\s.!,]*)+$",
+    re.IGNORECASE,
+)
+
+# Maps a coverage the caller might ask about ("does my policy cover a rental car?") to the
+# coverage-type label ``lookup_coverages`` reports, so we can answer yes/no directly instead
+# of only listing the schedule. First match wins; order specific concepts before general.
+_COVERAGE_QUERY = [
+    (re.compile(r"\brental\b"), "Rental Reimbursement", "rental car coverage"),
+    (
+        re.compile(r"windshield|glass"),
+        "Comprehensive",
+        "glass/windshield damage (covered under comprehensive)",
+    ),
+    (re.compile(r"tow|roadside"), "Roadside", "roadside or towing coverage"),
+    (re.compile(r"\bcollision\b|crash|fender"), "Collision", "collision coverage"),
+    (
+        re.compile(r"comprehensive|theft|stolen|hail|weather|vandal"),
+        "Comprehensive",
+        "comprehensive coverage",
+    ),
+    (re.compile(r"\bliability\b"), "Liability", "liability coverage"),
+    (re.compile(r"dwelling|structure"), "Dwelling", "dwelling coverage"),
+    (
+        re.compile(r"personal property|belongings|contents"),
+        "Personal Property",
+        "personal property coverage",
+    ),
+]
+
+
 class PolicyAgent(Specialist):
     name = AgentName.POLICY
     system_prompt = (
@@ -186,6 +222,19 @@ class PolicyAgent(Specialist):
         ):
             turn.needs_verification = True
             return
+        # Directly answer "do I have / does my policy cover <X>?" instead of only listing
+        # the schedule: check whether the asked-about coverage is present in what we found.
+        if any(tc.tool_name == "lookup_coverages" for tc in turn.tool_calls):
+            for pattern, label, concept in _COVERAGE_QUERY:
+                if pattern.search(m):
+                    present = any(f.split(" — ")[0].strip() == label for f in turn.facts)
+                    turn.facts.insert(
+                        0,
+                        f"Yes — your policy includes {concept}."
+                        if present
+                        else f"No — your policy does not include {concept}.",
+                    )
+                    break
         if not turn.tool_calls and re.search(r"my (policy|coverage)", m):
             turn.clarification = (
                 "Which policy is this about? A policy number like AUTO-10024 helps."
@@ -404,6 +453,8 @@ class GeneralAgent(Specialist):
     )
 
     def plan(self, message: str, intent: IntentResult, ctx: ToolContext) -> list[PlannedCall]:
+        if _GREETING_RE.match(message):
+            return []  # a greeting isn't a documentation query
         return [
             PlannedCall(
                 "search_knowledge", {"query": message, "product_type": infer_product(message)}
@@ -414,6 +465,14 @@ class GeneralAgent(Specialist):
         if tool_name == "search_knowledge":
             for p in data.get("passages", [])[:1]:
                 turn.facts.append(_snippet(p["content"]))
+
+    def post_process(self, turn, message, intent, ctx):
+        if not turn.tool_calls and _GREETING_RE.match(message):
+            turn.clarification = (
+                "Hi! I'm the Assured assistant. I can help with your policies, claims, billing, "
+                "and payments. For anything account-specific I'll verify your identity first. "
+                "What can I help you with?"
+            )
 
 
 class EscalationAgent(Specialist):
