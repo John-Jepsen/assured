@@ -44,6 +44,40 @@ async def _resolve_single_policy(ctx: ToolContext, product: str | None) -> str |
     return policies[0].policy_number if len(policies) == 1 else None
 
 
+async def _resolve_customer_policies(ctx: ToolContext, product: str | None) -> list[str]:
+    """All policy numbers owned by the verified customer, filtered by product when it
+    narrows the set. Lets a general billing question ("what do I owe?") resolve to every
+    relevant policy instead of demanding a policy number for multi-policy households.
+    """
+    if not ctx.session.is_verified or not ctx.session.customer_id:
+        return []
+    from sqlalchemy import select
+
+    from insurance_ai.db.models import Policy
+
+    rows = await ctx.db.execute(select(Policy).where(Policy.customer_id == ctx.session.customer_id))
+    policies = list(rows.scalars().all())
+    if product:
+        matching = [p for p in policies if p.product_type == product]
+        if matching:
+            policies = matching
+    return [p.policy_number for p in policies]
+
+
+async def _resolve_customer_claims(ctx: ToolContext) -> list[str]:
+    """Claim numbers owned by the verified customer, so a verified caller can ask about
+    "my claim" without reciting a claim number.
+    """
+    if not ctx.session.is_verified or not ctx.session.customer_id:
+        return []
+    from sqlalchemy import select
+
+    from insurance_ai.db.models import Claim
+
+    rows = await ctx.db.execute(select(Claim).where(Claim.customer_id == ctx.session.customer_id))
+    return [c.claim_number for c in rows.scalars().all()]
+
+
 def _snippet(text: str, max_chars: int = 260) -> str:
     """Trim a retrieved passage to its first sentence(s) for a concise answer."""
     text = " ".join(text.split())
@@ -63,7 +97,9 @@ class PolicyAgent(Specialist):
 
     async def augment(self, ctx: ToolContext, message: str, intent: IntentResult) -> None:
         if not intent.entities.policy_numbers and re.search(
-            r"cover|deductible|limit|exclusion|renew|my policy", message.lower()
+            r"cover|deductible|limit|exclusion|renew|my policy|add|remove|change|update"
+            r"|driver|vehicle",
+            message.lower(),
         ):
             resolved = await _resolve_single_policy(ctx, infer_product(message))
             if resolved:
@@ -115,7 +151,9 @@ class PolicyAgent(Specialist):
         if tool_name == "search_knowledge" and data.get("passages"):
             turn.facts.append(_snippet(data["passages"][0]["content"]))
 
-    def post_process(self, turn: AgentTurn, message: str, intent: IntentResult) -> None:
+    def post_process(
+        self, turn: AgentTurn, message: str, intent: IntentResult, ctx: ToolContext
+    ) -> None:
         if not turn.tool_calls and re.search(r"my (policy|coverage)", message.lower()):
             turn.clarification = (
                 "Which policy is this about? A policy number like AUTO-10024 helps."
@@ -126,16 +164,28 @@ class ClaimsAgent(Specialist):
     name = AgentName.CLAIMS
     system_prompt = _GUARDRAIL + " You handle claim lookups, status, FNOL filing, and disputes."
 
+    async def augment(self, ctx: ToolContext, message: str, intent: IntentResult) -> None:
+        # A verified caller asking about "my claim" without a number: resolve the claim(s)
+        # they own. Filing a *new* claim needs explicit loss details (handled below), so
+        # skip resolution there.
+        if intent.entities.claim_numbers or re.search(
+            r"\bfile\b.*claim|start a claim|new claim", message.lower()
+        ):
+            return
+        if re.search(r"claim|adjuster|dispute|status", message.lower()):
+            intent.entities.claim_numbers.extend(await _resolve_customer_claims(ctx))
+
     def plan(self, message: str, intent: IntentResult, ctx: ToolContext) -> list[PlannedCall]:
         calls: list[PlannedCall] = []
         m = message.lower()
-        claim = intent.entities.claim_numbers[0] if intent.entities.claim_numbers else None
-        if claim:
-            if "adjuster" in m:
-                calls.append(PlannedCall("get_adjuster_info", {"claim_number": claim}))
-            elif re.search(r"dispute|disagree|wrong|denied", m):
-                calls.append(PlannedCall("escalate_claim_dispute", {"claim_number": claim}))
-            else:
+        claims = intent.entities.claim_numbers
+        if claims and "adjuster" in m:
+            calls.append(PlannedCall("get_adjuster_info", {"claim_number": claims[0]}))
+        elif claims and re.search(r"dispute|disagree|wrong|denied", m):
+            calls.append(PlannedCall("escalate_claim_dispute", {"claim_number": claims[0]}))
+        else:
+            # Status for each owned/named claim (multi-claim households see them all).
+            for claim in claims:
                 calls.append(PlannedCall("get_claim_status", {"claim_number": claim}))
         # Always provide the claim workflow context.
         if re.search(r"how .*(file|claim)|workflow|what happens|next step", m):
@@ -150,7 +200,7 @@ class ClaimsAgent(Specialist):
         if tool_name == "search_knowledge" and data.get("passages"):
             turn.facts.append(_snippet(data["passages"][0]["content"]))
 
-    def post_process(self, turn, message, intent):
+    def post_process(self, turn, message, intent, ctx):
         m = message.lower()
         if (
             re.search(r"\bfile\b.*claim|start a claim|new claim", m)
@@ -160,6 +210,16 @@ class ClaimsAgent(Specialist):
                 "I can start a first notice of loss. What's the policy number, the type of loss, "
                 "and the date it happened?"
             )
+        elif not turn.tool_calls and re.search(r"my claim|claim status|status of .*claim", m):
+            if not ctx.session.is_verified:
+                # Don't assert absence to an unverified caller — ask them to verify.
+                turn.needs_verification = True
+            else:
+                # Verified caller asked about a claim but owns none.
+                turn.clarification = (
+                    "I don't see any claims on your account. If you had a loss, I can start a "
+                    "first notice of loss — just tell me the policy, the loss type, and the date."
+                )
 
 
 class BillingAgent(Specialist):
@@ -172,16 +232,17 @@ class BillingAgent(Specialist):
         if (
             not intent.entities.policy_numbers
             and not intent.entities.invoice_numbers
-            and re.search(r"balance|payment|premium|autopay|bill", message.lower())
+            and re.search(r"balance|payment|premium|autopay|bill|owe|due", message.lower())
         ):
-            resolved = await _resolve_single_policy(ctx, infer_product(message))
-            if resolved:
-                intent.entities.policy_numbers.append(resolved)
+            # Resolve every relevant policy (filtered by product when the caller named one),
+            # so a multi-policy household gets each balance instead of a "which policy?" prompt.
+            intent.entities.policy_numbers.extend(
+                await _resolve_customer_policies(ctx, infer_product(message))
+            )
 
     def plan(self, message: str, intent: IntentResult, ctx: ToolContext) -> list[PlannedCall]:
         calls: list[PlannedCall] = []
         m = message.lower()
-        pol = intent.entities.policy_numbers[0] if intent.entities.policy_numbers else None
         inv = intent.entities.invoice_numbers[0] if intent.entities.invoice_numbers else None
         pending = ctx.session.pending_payment
         # Answering a prior "shall I confirm this payment?": a bare "yes" completes the
@@ -210,11 +271,14 @@ class BillingAgent(Specialist):
             if intent.entities.amounts:
                 args["amount"] = intent.entities.amounts[0]
             calls.append(PlannedCall("make_payment", args))
-        elif pol:
-            if re.search(r"history|past payment", m):
-                calls.append(PlannedCall("get_payment_history", {"policy_number": pol}))
-            else:
-                calls.append(PlannedCall("get_billing_status", {"policy_number": pol}))
+        elif intent.entities.policy_numbers:
+            tool = (
+                "get_payment_history"
+                if re.search(r"history|past payment", m)
+                else "get_billing_status"
+            )
+            for p in intent.entities.policy_numbers:
+                calls.append(PlannedCall(tool, {"policy_number": p}))
         if re.search(r"why .*(increase|went up|higher|more)", m):
             calls.append(PlannedCall("search_knowledge", {"query": message, "category": "billing"}))
         return calls
@@ -223,7 +287,7 @@ class BillingAgent(Specialist):
         if tool_name == "search_knowledge" and data.get("passages"):
             turn.facts.append(_snippet(data["passages"][0]["content"]))
 
-    def post_process(self, turn, message, intent):
+    def post_process(self, turn, message, intent, ctx):
         m = message.lower()
         # A bare "no" reaches billing only when it cancels a pending payment (routed here
         # by the orchestrator); acknowledge it instead of falling through to a clarification.
@@ -269,7 +333,7 @@ class SchedulingAgent(Specialist):
         # Scheduling requires a concrete time; if absent, post_process asks for it.
         return []
 
-    def post_process(self, turn, message, intent):
+    def post_process(self, turn, message, intent, ctx):
         if intent.entities.dates:
             turn.clarification = (
                 "I can schedule that. What time on "
@@ -329,7 +393,7 @@ class EscalationAgent(Specialist):
             )
         ]
 
-    def post_process(self, turn: AgentTurn, message, intent):
+    def post_process(self, turn: AgentTurn, message, intent, ctx):
         turn.escalated = True
 
 

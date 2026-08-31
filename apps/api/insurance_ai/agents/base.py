@@ -65,7 +65,7 @@ class Specialist:
                 continue  # scoping guard: never run a tool outside this agent's set
             result = await tool.run(ctx, call.arguments)
             self._absorb(turn, call.tool_name, call.arguments, result)
-        self.post_process(turn, message, intent)
+        self.post_process(turn, message, intent, ctx)
         return turn
 
     def _absorb(self, turn: AgentTurn, name: str, args: dict, result: ToolResult) -> None:
@@ -91,5 +91,7 @@ class Specialist:
     def fact_from_data(self, turn: AgentTurn, tool_name: str, data: dict) -> None:
         """Override to turn structured tool data into human-facing grounded facts."""
 
-    def post_process(self, turn: AgentTurn, message: str, intent: IntentResult) -> None:
+    def post_process(
+        self, turn: AgentTurn, message: str, intent: IntentResult, ctx: ToolContext
+    ) -> None:
         """Override for agent-specific finalization (clarifications, escalation)."""
