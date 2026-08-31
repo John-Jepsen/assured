@@ -26,7 +26,12 @@ dependencies = [
 [project.optional-dependencies]
 # Real model adapters — installed per hardware profile, not required for the
 # deterministic core / tests.
-speech = ["faster-whisper>=1.0", "piper-tts>=1.2", "soundfile>=0.12"]
+speech = [
+    "faster-whisper>=1.0",
+    "piper-tts>=1.2",
+    "soundfile>=0.12",
+    "sentence-transformers>=2.2",
+]
 stripe = ["stripe>=9.0"]
 telephony = ["twilio>=9.0"]
 otel = [
