@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date, timedelta
 
 from insurance_ai.agents.base import AgentTurn, PlannedCall, Specialist
 from insurance_ai.agents.intent import IntentResult, infer_product, reply_polarity
@@ -93,6 +94,50 @@ _CONCEPTUAL_RE = re.compile(
 
 def _is_conceptual(message: str) -> bool:
     return bool(_CONCEPTUAL_RE.search(message.lower()))
+
+
+# Wanting to file a new claim (first notice of loss), as opposed to asking about an
+# existing one or how the process works.
+_FILE_CLAIM_RE = re.compile(
+    r"\bfil(e|ing)\b.*\bclaim|start (a )?claim|new claim|open (a )?claim|"
+    r"report (a )?(claim|loss|accident|incident)",
+    re.IGNORECASE,
+)
+
+# Abandoning an in-progress flow (e.g. a first notice of loss being collected).
+_CANCEL_RE = re.compile(r"\b(cancel|never ?mind|forget it|stop|no thanks|not now)\b", re.IGNORECASE)
+
+# Free-text loss description → the loss_type the FNOL tool records.
+_LOSS_TYPES = [
+    (re.compile(r"windshield|glass|rock chip"), "glass"),
+    (re.compile(r"collision|rear.?end|fender|crash|hit|totaled|accident"), "collision"),
+    (re.compile(r"theft|stolen|break.?in|burglar"), "theft"),
+    (re.compile(r"water|pipe|leak|flood"), "water_damage"),
+    (re.compile(r"fire|smoke|burn"), "fire"),
+    (re.compile(r"hail|storm|\bwind\b|weather|tree fell"), "weather"),
+    (re.compile(r"vandal"), "vandalism"),
+    (re.compile(r"injur|\bhurt\b|medical"), "injury"),
+]
+
+
+def _infer_loss_type(message: str) -> str | None:
+    m = message.lower()
+    for pattern, loss_type in _LOSS_TYPES:
+        if pattern.search(m):
+            return loss_type
+    return None
+
+
+def _resolve_loss_date(intent: IntentResult, message: str) -> str | None:
+    """An explicit YYYY-MM-DD, or a common relative term, as an ISO date string."""
+    if intent.entities.dates:
+        return intent.entities.dates[0]
+    m = message.lower()
+    if "today" in m:
+        return date.today().isoformat()
+    if "yesterday" in m:
+        return (date.today() - timedelta(days=1)).isoformat()
+    return None
 
 
 # Bare greetings / small talk / acknowledgements — answered with a welcome, not a
@@ -245,13 +290,39 @@ class ClaimsAgent(Specialist):
     name = AgentName.CLAIMS
     system_prompt = _GUARDRAIL + " You handle claim lookups, status, FNOL filing, and disputes."
 
+    def _filing(self, ctx: ToolContext, message: str) -> bool:
+        """We are filing a claim if the caller asked to, or a FNOL is already in progress."""
+        started = bool(_FILE_CLAIM_RE.search(message)) and not _is_conceptual(message)
+        return started or bool(ctx.session.pending_claim)
+
+    def _fnol_fields(self, ctx: ToolContext, message: str, intent: IntentResult) -> dict:
+        """Merge any in-progress FNOL with details in the current message."""
+        prev = ctx.session.pending_claim or {}
+        pol = (
+            intent.entities.policy_numbers[0]
+            if intent.entities.policy_numbers
+            else prev.get("policy_number")
+        )
+        desc = (f"{prev.get('description', '')} {message}").strip()
+        return {
+            "policy_number": pol,
+            "loss_type": _infer_loss_type(message) or prev.get("loss_type"),
+            "date_of_loss": _resolve_loss_date(intent, message) or prev.get("date_of_loss"),
+            "description": desc,
+        }
+
     async def augment(self, ctx: ToolContext, message: str, intent: IntentResult) -> None:
-        # A verified caller asking about "my claim" without a number: resolve the claim(s)
-        # they own. Filing a *new* claim needs explicit loss details (handled below), so
-        # skip resolution there.
-        if intent.entities.claim_numbers or re.search(
-            r"\bfile\b.*claim|start a claim|new claim", message.lower()
-        ):
+        # Filing a new claim needs a *policy* (not an existing claim): resolve the single
+        # relevant one when the caller didn't name it.
+        if self._filing(ctx, message):
+            if not intent.entities.policy_numbers:
+                resolved = await _resolve_single_policy(ctx, infer_product(message))
+                if resolved:
+                    intent.entities.policy_numbers.append(resolved)
+            return
+        # Otherwise, a verified caller asking about "my claim" without a number: resolve the
+        # claim(s) they own.
+        if intent.entities.claim_numbers:
             return
         if re.search(r"claim|adjuster|dispute|status", message.lower()):
             intent.entities.claim_numbers.extend(await _resolve_customer_claims(ctx))
@@ -259,6 +330,13 @@ class ClaimsAgent(Specialist):
     def plan(self, message: str, intent: IntentResult, ctx: ToolContext) -> list[PlannedCall]:
         calls: list[PlannedCall] = []
         m = message.lower()
+        # File a new claim (FNOL) once we have policy + loss type + date of loss (accumulated
+        # across turns via the pending-claim state).
+        if self._filing(ctx, message):
+            f = self._fnol_fields(ctx, message, intent)
+            if f["policy_number"] and f["loss_type"] and f["date_of_loss"]:
+                calls.append(PlannedCall("create_claim", f))
+            return calls  # filing intent: don't also run status/doc lookups
         claims = intent.entities.claim_numbers
         if claims and "adjuster" in m:
             calls.append(PlannedCall("get_adjuster_info", {"claim_number": claims[0]}))
@@ -283,15 +361,30 @@ class ClaimsAgent(Specialist):
 
     def post_process(self, turn, message, intent, ctx):
         m = message.lower()
-        if (
-            re.search(r"\bfile\b.*claim|start a claim|new claim", m)
-            and not intent.entities.claim_numbers
-        ):
+        if self._filing(ctx, message):
+            if any(tc.tool_name == "create_claim" and tc.ok for tc in turn.tool_calls):
+                ctx.session.pending_claim = None  # filed — the FNOL is complete
+                return
+            if not ctx.session.is_verified:
+                ctx.session.pending_claim = None  # don't accumulate details before verifying
+                turn.needs_verification = True
+                return
+            # Remember what we have so the next turn continues this FNOL, and ask only for
+            # the detail(s) still missing.
+            f = self._fnol_fields(ctx, message, intent)
+            ctx.session.pending_claim = f
+            missing = []
+            if not f["policy_number"]:
+                missing.append("the policy number")
+            if not f["loss_type"]:
+                missing.append("the type of loss (e.g. collision, theft, water damage, glass)")
+            if not f["date_of_loss"]:
+                missing.append("the date it happened (YYYY-MM-DD)")
             turn.clarification = (
-                "I can start a first notice of loss. What's the policy number, the type of loss, "
-                "and the date it happened?"
+                "I can start a first notice of loss. I still need " + ", ".join(missing) + "."
             )
-        elif not turn.tool_calls and re.search(r"my claim|claim status|status of .*claim", m):
+            return
+        if not turn.tool_calls and re.search(r"my claim|claim status|status of .*claim", m):
             if not ctx.session.is_verified:
                 # Don't assert absence to an unverified caller — ask them to verify.
                 turn.needs_verification = True

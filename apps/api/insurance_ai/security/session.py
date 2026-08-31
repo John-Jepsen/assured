@@ -26,6 +26,10 @@ class Session:
     # "yes" completes it. Set when make_payment asks to confirm; cleared once the
     # charge is attempted or the caller declines. Shape: {"invoice_number", "amount"}.
     pending_payment: dict[str, Any] | None = None
+    # A first-notice-of-loss being collected across turns. Set while claim details are
+    # still incomplete; cleared once the claim is filed or the caller moves on. Shape:
+    # {"policy_number", "loss_type", "date_of_loss", "description"} (any may be None).
+    pending_claim: dict[str, Any] | None = None
 
     @property
     def is_verified(self) -> bool:

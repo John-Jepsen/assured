@@ -7,6 +7,7 @@ answer. Emits a full structured execution trace for the admin dashboard.
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -16,7 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from insurance_ai.agents.composer import compose
 from insurance_ai.agents.intent import detect, reply_polarity
-from insurance_ai.agents.specialists import SPECIALISTS
+from insurance_ai.agents.specialists import (
+    _CANCEL_RE,
+    _FILE_CLAIM_RE,
+    SPECIALISTS,
+    _infer_loss_type,
+)
 from insurance_ai.config import get_settings
 from insurance_ai.domain.enums import AgentName, VerificationStatus
 from insurance_ai.providers.base import ChatMessage
@@ -145,6 +151,26 @@ class Orchestrator:
                 intent.agents = [AgentName.BILLING]
             else:
                 session.pending_payment = None
+        if session.pending_claim:
+            # A first notice of loss is mid-collection. Keep routing follow-up detail turns
+            # (a policy number, a date, a loss description) to claims. A cancellation or a
+            # clearly different request drops the pending FNOL and routes normally.
+            other_intent = any(
+                a in intent.agents
+                for a in (AgentName.BILLING, AgentName.SCHEDULING, AgentName.ESCALATION)
+            )
+            has_detail = bool(
+                intent.entities.policy_numbers
+                or intent.entities.dates
+                or _infer_loss_type(message)
+                or _FILE_CLAIM_RE.search(message)
+                or re.search(r"\b(today|yesterday)\b", message.lower())
+            )
+            if _CANCEL_RE.search(message) or (other_intent and not has_detail):
+                session.pending_claim = None
+            else:
+                intent.intents = ["claims"]
+                intent.agents = [AgentName.CLAIMS]
         trace.intents = intent.intents
         trace.agents = [a.value for a in intent.agents]
         trace.verification_status = session.verification_status
