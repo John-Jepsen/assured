@@ -109,9 +109,10 @@ class PolicyAgent(Specialist):
         calls: list[PlannedCall] = []
         pol = _policy_hint(intent, ctx)
         m = message.lower()
+        coverage_q = bool(re.search(r"cover|deductible|limit|exclusion", m))
         # Specific policy facts lead the answer; general documentation grounds it after.
         if pol:
-            if re.search(r"cover|deductible|limit|exclusion", m):
+            if coverage_q:
                 calls.append(PlannedCall("lookup_coverages", {"policy_number": pol}))
             elif re.search(r"vehicle|asset|driver|dwelling|insured", m):
                 calls.append(PlannedCall("lookup_insured_assets", {"policy_number": pol}))
@@ -128,7 +129,12 @@ class PolicyAgent(Specialist):
                         },
                     )
                 )
-        if re.search(r"cover|rental|deductible|limit|exclusion|glass|windshield|tow", m):
+        # Supplementary documentation — skip it when the customer's own coverage record
+        # already answers the question, so a doc-search "miss" never tails a concrete answer.
+        answered_from_policy = bool(pol) and coverage_q
+        if not answered_from_policy and re.search(
+            r"cover|rental|deductible|limit|exclusion|glass|windshield|tow", m
+        ):
             calls.append(
                 PlannedCall(
                     "search_knowledge", {"query": message, "product_type": infer_product(message)}
@@ -154,7 +160,16 @@ class PolicyAgent(Specialist):
     def post_process(
         self, turn: AgentTurn, message: str, intent: IntentResult, ctx: ToolContext
     ) -> None:
-        if not turn.tool_calls and re.search(r"my (policy|coverage)", message.lower()):
+        m = message.lower()
+        # An unverified caller asking about *their* policy: prompt to verify rather than
+        # let a generic doc-search miss stand in for the account-specific answer.
+        if (
+            re.search(r"my (policy|coverage|deductible|limit|premium|car|vehicle|home)", m)
+            and not ctx.session.is_verified
+        ):
+            turn.needs_verification = True
+            return
+        if not turn.tool_calls and re.search(r"my (policy|coverage)", m):
             turn.clarification = (
                 "Which policy is this about? A policy number like AUTO-10024 helps."
             )
