@@ -55,6 +55,26 @@ Two memory scopes are kept separate:
 
 Keeping them separate means transient session state (and the identity binding that gates tool authorization) never leaks into the durable record, and the persisted transcript is not treated as live working memory.
 
+## Multi-turn transactional flows
+
+Some actions need details the caller supplies over several turns. Two flows carry
+explicit, minimal state on the session so a follow-up turn continues the task instead of
+starting over:
+
+- **Payment confirmation** — a payment is never auto-charged. `make_payment` records a
+  pending charge and asks to confirm; only a bare "yes"/"no" on the next turn completes or
+  cancels it. Anything else expires the pending charge, so a stray "yes" on a later,
+  unrelated turn can never complete a payment.
+- **Claim filing (FNOL)** — filing needs a policy, a loss type, and a date of loss. These
+  can arrive in one message or across turns; the Claims agent accumulates them (inferring
+  loss type from the description, accepting explicit or relative dates) and files once
+  complete. A cancellation or a clear change of subject drops the in-progress claim.
+
+For a verified caller, the specialists also resolve the caller's *own* records rather than
+demanding identifiers — the single relevant policy or claim, or each policy for a
+multi-policy household. Filing and payment stay behind the same verification and ownership
+gates as every other protected tool.
+
 ## Trust Boundaries
 
 Retrieved documents are **untrusted**: they are sanitized against prompt injection, and system, user, retrieved, and tool content are kept in separate channels. Combined with the session-bound customer and the authorization gate, this prevents cross-customer access and stops retrieved text from steering tool selection or authorization.
