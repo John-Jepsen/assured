@@ -1,7 +1,30 @@
 # Insurance AI — multimodal customer service platform (synthetic demo).
-# Three services: Postgres (pgvector), the async API/agent/speech/telephony backend,
-# and the React frontend (nginx, proxies API + WebSockets). Readiness is enforced with
-# health checks + depends_on conditions — no fixed sleep timers.
+# PostgreSQL, explicit migration/bootstrap jobs, the async API, and the React frontend.
+# Readiness and successful job completion are dependency-gated without sleep timers.
+
+x-api-runtime: &api-runtime
+  image: assured-api:${ASSURED_IMAGE_TAG:-local}
+  build:
+    context: .
+    dockerfile: docker/api.Dockerfile
+    args:
+      INSTALL_SPEECH: "${INSTALL_SPEECH:-false}"
+  env_file:
+    - path: .env
+      required: false
+  environment: &api-environment
+    INSURANCE_AI_DATABASE_URL: postgresql+asyncpg://insurance:insurance@postgres:5432/insurance_ai
+  volumes:
+    - modelcache:/models
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
 
 services:
   postgres:
@@ -21,35 +44,35 @@ services:
       retries: 10
       start_period: 10s
 
-  api:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
-      args:
-        # Set to "true" to bake the speech/ML extras into the image (larger build).
-        INSTALL_SPEECH: "${INSTALL_SPEECH:-false}"
-    env_file:
-      # Optional: holds provider keys (OpenAI / Stripe test / Twilio / HF). The demo
-      # runs fully without it on mock/local providers.
-      - path: .env
-        required: false
-    environment:
-      INSURANCE_AI_DATABASE_URL: postgresql+asyncpg://insurance:insurance@postgres:5432/insurance_ai
+  migrate:
+    <<: *api-runtime
+    command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      # Persistent model cache — models download once, survive restarts.
-      - modelcache:/models
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    stop_grace_period: 30s
+    restart: "no"
+
+  seed-demo:
+    <<: *api-runtime
+    command: ["python", "-m", "scripts.bootstrap", "--if-empty", "--skip-ingest"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  ingest:
+    <<: *api-runtime
+    command: ["python", "-m", "scripts.bootstrap", "--if-empty", "--skip-seed"]
+    depends_on:
+      seed-demo:
+        condition: service_completed_successfully
+    restart: "no"
+
+  api:
+    <<: *api-runtime
+    depends_on:
+      ingest:
+        condition: service_completed_successfully
     ports:
       - "${API_PORT:-8000}:8000"
 

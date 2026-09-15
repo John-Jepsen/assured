@@ -34,6 +34,7 @@ setup-web:
 	cd $(WEB_DIR) && npm install
 
 seed:
+	cd $(API_DIR) && ../../$(VENV)/bin/alembic upgrade head
 	cd $(API_DIR) && ../../$(PY) -m scripts.bootstrap
 
 dev:

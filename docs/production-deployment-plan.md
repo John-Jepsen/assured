@@ -72,7 +72,7 @@ The highest-risk implementation gaps are:
 | LLM runtime | A remote-provider and vLLM foundation exists but is not capacity-tested | Safe concurrency, model quality, and GPU sizing are not yet established |
 | Grounding validation | A conservative validator now protects amounts, identifiers, citations, URLs, critical insurance concepts, and polarity before output is released | Real-model adversarial evaluation and broader semantic-entailment coverage are still required |
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
-| Startup | Every API replica runs migrations and knowledge ingestion | Deployments can race and model-backed ingestion delays every replica startup |
+| Startup | Compose separates migrations, synthetic seeding, ingestion, and API serving into dependency-gated jobs | The selected production orchestrator still needs equivalent release jobs, concurrency protection, and content-versioned ingestion |
 | Readiness | `/ready` returns HTTP 503 when PostgreSQL is unavailable, but does not yet cover the session store, model service, or production-configuration validity | An orchestrator can still route traffic to a partially functional instance |
 | Supply chain | Runtime image checks exist, but dependencies/tags remain broad and images are not scanned or signed | Builds are not fully reproducible and dependency changes can reach production unreviewed |
 

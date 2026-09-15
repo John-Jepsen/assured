@@ -21,6 +21,9 @@ All notable changes to this project are documented here.
   or invented amounts, identifiers, citations, URLs, critical insurance concepts, and
   polarity before any text reaches chat or speech; unsafe output falls back to the
   deterministic grounded draft with trace metadata.
+- **Controlled database startup jobs.** Compose now applies migrations, loads synthetic
+  demo data, and ingests knowledge as separately gated one-shot services before API
+  replicas start. Production ingestion can explicitly disable demo seeding.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

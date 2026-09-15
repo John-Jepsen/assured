@@ -88,8 +88,10 @@ docker compose up --build
 # Web http://localhost:8080 · API http://localhost:8000 (/health, /docs)
 ```
 
-Runs on deterministic mock/local providers — no GPU, downloads, or credentials. Startup
-is readiness-gated (health checks + `depends_on`), not timed sleeps.
+Runs on deterministic mock/local providers — no GPU, downloads, or credentials. Compose
+runs migration, synthetic-demo seed, and knowledge-ingestion jobs once before starting
+the API; ordinary API replicas never mutate schema or seed data. Startup is gated on
+health and successful job completion, not timed sleeps.
 
 **With real open models (no API keys)** — adds an Ollama sidecar (LLM + embeddings,
 cached once) and/or Piper TTS + Whisper STT:
