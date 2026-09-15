@@ -22,7 +22,6 @@ import asyncio
 import base64
 import binascii
 import time
-import uuid
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -30,6 +29,7 @@ from insurance_ai.api.schemas import MAX_CHAT_MESSAGE_CHARS, MAX_CONVERSATION_ID
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory
 from insurance_ai.observability import get_logger
+from insurance_ai.observability.middleware import request_id_from_scope
 from insurance_ai.providers.factory import get_providers
 from insurance_ai.security.identity import Principal, websocket_principal
 from insurance_ai.security.origin import websocket_origin_allowed
@@ -52,7 +52,12 @@ async def _run_response(
     t_end: float,
     principal: Principal,
     pretranscribed: str | None = None,
+    *,
+    request_id: str,
 ):
+    """Run one utterance. ``request_id`` is the connection's correlation ID, minted or
+    validated once by :class:`ObservabilityMiddleware`, so every turn of a voice call
+    shares the ID an operator sees in the logs and in the trace."""
     providers = get_providers()
     metrics: dict[str, float] = {}
 
@@ -77,7 +82,7 @@ async def _run_response(
             transcript,
             principal=principal,
             channel="web",
-            request_id=str(uuid.uuid4()),
+            request_id=request_id,
         )
         result = turn.result
         conv = turn.conversation
@@ -150,6 +155,7 @@ async def ws_voice(ws: WebSocket) -> None:
         await ws.close(code=1013, reason="Rate limit exceeded")
         return
     await ws.accept()
+    request_id = request_id_from_scope(ws.scope)
     buffer = bytearray()
     task: asyncio.Task | None = None
     conversation_id: str | None = None
@@ -227,6 +233,7 @@ async def ws_voice(ws: WebSocket) -> None:
                         t_end,
                         principal,
                         pretranscribed,
+                        request_id=request_id,
                     )
                 )
 
