@@ -134,13 +134,29 @@ rather than inventing coverage.
 ## Rate Limiting
 
 Abuse control sits in front of the agent, not inside it. Every non-preflight
-`/api/*` HTTP request is bounded by source IP; the health and metrics probes
-are deliberately exempt so they stay reachable during an incident.
-Authenticated customer and admin routes add a per-principal bound keyed on the
-OIDC subject, and each chat or voice WebSocket is bounded twice — once when the
-connection is opened, and again on every chat turn or completed utterance, so
-an accepted socket cannot become an unbounded generation loop. Exceeding a
-limit returns HTTP 429 with `Retry-After`, or closes the socket with code 1013.
+HTTP request is bounded by source IP; only the `/health` and `/ready` probes are
+exempt, so they stay reachable during an incident, and the token-authenticated
+`/metrics` scrape is bounded like every other route rather than left open to
+brute force. Authenticated customer and admin routes add a per-principal bound
+keyed on the OIDC subject, and each chat or voice WebSocket is bounded twice —
+once when the connection is opened, and again on every chat turn or completed
+utterance, so an accepted socket cannot become an unbounded generation loop.
+Exceeding a limit returns HTTP 429 with a `{"error": "rate_limited"}` body and
+`Retry-After` — the same body from both the per-IP middleware and the
+per-principal gate, returned through CORS so a browser can read it — or closes
+the socket with code 1013.
+
+The source IP is the address the connection was accepted from, not a header a
+caller can write. Forwarded headers are read only when that peer appears in
+`INSURANCE_AI_RATE_LIMIT_TRUSTED_PROXIES`, which is **empty by default**, so an
+untrusted caller can never nominate its own bucket. When a trusted proxy is
+configured, the `X-Forwarded-For` chain is walked right to left past trusted
+hops, so the entry the proxy appended wins and anything a client prepended is
+unreachable; addresses are canonicalized so spelling variants cannot split one
+bucket. The container entrypoint runs uvicorn with `--no-proxy-headers` so this
+setting is the single place proxy trust is decided. Behind a proxy that is not
+listed, every visitor shares one bucket — per-deployment configuration is
+required, and Compose sets the nginx container address for the bundled stack.
 
 Counters are fixed-window and keyed by a SHA-256 digest of the subject or client
 address, so no raw identifier reaches the counter store. With
