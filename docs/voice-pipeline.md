@@ -44,6 +44,23 @@ The stages, in order:
 
 If the caller speaks while TTS is playing, VAD detects the new speech, playback stops immediately, and the turn is reprocessed with the new input. This keeps the conversation natural and prevents the assistant from talking over the user. Barge-in is handled at the pipeline boundary so it works regardless of which STT/TTS providers are active.
 
+**Cancellation stops the speech, not the bookkeeping.** A barge-in cancels the in-flight
+response task, which cuts the token and TTS stream short — that is the point. The turn's
+database work is the one part that must not be cut short: cancelling an `await` that is
+suspended inside a statement leaves the connection in a state SQLAlchemy cannot reset, so
+it treats the cancellation as a disconnect, replaces the pool entry, and the original
+connection survives detached with its transaction still open until the garbage collector
+gets to it. The pool looks healthy while a write lock (SQLite) or a set of row locks
+(PostgreSQL) is held for an unbounded time.
+
+So planning and persistence — the user message, the state-changing tool writes, the
+assistant message — run under `db/cancellation.py`'s `uninterruptible()`, which defers the
+`CancelledError` until the statement completes and then re-raises it. The caller still
+unwinds promptly; it just never abandons a statement mid-flight. This deliberately does
+*not* wrap the token/TTS loop, which is exactly what barge-in needs to interrupt. The
+streaming chat socket wraps the same two calls for the same reason, since a disconnect or
+a shutdown cancels its task at the same points.
+
 ## STT and TTS Choices
 
 **STT — faster-whisper (Whisper family).** Chosen for streaming / near-streaming behavior with partial transcripts, CPU and GPU support, and configurable model size. This lets us trade accuracy for latency per hardware profile without changing the pipeline.
