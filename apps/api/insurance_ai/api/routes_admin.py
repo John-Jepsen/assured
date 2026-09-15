@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from insurance_ai.api.service import ConversationService
+from insurance_ai.config import get_settings
 from insurance_ai.db.base import get_session
 from insurance_ai.db.models import (
     Conversation,
@@ -24,6 +25,8 @@ _service = ConversationService()
 
 @router.get("/demo-customers")
 async def demo_customers() -> dict:
+    if not get_settings().demo_features_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
     return {"synthetic": True, "customers": DEMO_CUSTOMERS}
 
 

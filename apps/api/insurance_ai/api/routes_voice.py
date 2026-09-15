@@ -31,6 +31,7 @@ from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory
 from insurance_ai.observability import get_logger
 from insurance_ai.providers.factory import get_providers
+from insurance_ai.security.origin import websocket_origin_allowed
 
 router = APIRouter(tags=["voice"])
 log = get_logger("voice")
@@ -122,6 +123,9 @@ async def _run_response(
 
 @router.websocket("/ws/voice")
 async def ws_voice(ws: WebSocket) -> None:
+    if not websocket_origin_allowed(ws.headers.get("origin")):
+        await ws.close(code=1008, reason="Origin not allowed")
+        return
     await ws.accept()
     buffer = bytearray()
     task: asyncio.Task | None = None

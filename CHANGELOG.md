@@ -24,6 +24,10 @@ All notable changes to this project are documented here.
 - **Controlled database startup jobs.** Compose now applies migrations, loads synthetic
   demo data, and ingests knowledge as separately gated one-shot services before API
   replicas start. Production ingestion can explicitly disable demo seeding.
+- **Fail-closed production configuration.** Production startup now rejects demo controls,
+  mock providers, non-pgvector retrieval, default database credentials, insecure browser
+  origins, unsigned Stripe webhooks, and unverified telephony; HTTP and browser
+  WebSockets enforce the same exact origin allowlist.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

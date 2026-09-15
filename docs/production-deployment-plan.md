@@ -68,7 +68,7 @@ The highest-risk implementation gaps are:
 | Authentication | Customer and admin routes have no application identity | Conversation and operational data can be accessed without a trusted principal |
 | Conversation ownership | A caller can submit an arbitrary existing conversation ID | A leaked or discovered ID can be used to attach to another conversation |
 | Session storage | Verification and pending actions are held in process memory | State is lost on restart and differs across workers or replicas |
-| Demo identity | A fixed OTP and a public synthetic customer directory are enabled | Demo controls cannot be allowed in a real environment |
+| Demo identity | A fixed OTP and synthetic customer directory remain available in development, while production configuration rejects the OTP and disables the directory | Production identity still requires the planned OIDC/MFA integration |
 | LLM runtime | A remote-provider and vLLM foundation exists but is not capacity-tested | Safe concurrency, model quality, and GPU sizing are not yet established |
 | Grounding validation | A conservative validator now protects amounts, identifiers, citations, URLs, critical insurance concepts, and polarity before output is released | Real-model adversarial evaluation and broader semantic-entailment coverage are still required |
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |

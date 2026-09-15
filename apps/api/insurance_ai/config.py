@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 HardwareProfile = Literal["local-cpu", "apple-silicon", "nvidia", "cloud-gpu"]
@@ -39,6 +40,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    allowed_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://localhost:8080"]
+    )
+    demo_features_enabled: bool = True
     # Optional OpenTelemetry tracing. When enabled, the API is auto-instrumented and
     # spans export via OTLP to the standard OTEL_EXPORTER_OTLP_ENDPOINT (or the default
     # http://localhost:4318). Off by default; requires the `otel` extra.
@@ -103,8 +108,28 @@ class Settings(BaseSettings):
 
     # --- security ----------------------------------------------------------
     verification_max_attempts: int = 3
-    otp_code_for_demo: str = "123456"  # deterministic demo OTP (synthetic)
+    otp_code_for_demo: str | None = "123456"  # deterministic demo OTP (synthetic)
     session_ttl_seconds: int = 3600
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _validate_origins(cls, origins: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for origin in origins:
+            parsed = urlsplit(origin)
+            if (
+                origin == "*"
+                or parsed.scheme not in {"http", "https"}
+                or not parsed.netloc
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    "allowed_origins must contain exact http(s) origins without paths or wildcards"
+                )
+            normalized.append(origin.rstrip("/"))
+        return normalized
 
     @model_validator(mode="after")
     def _check_provider_credentials(self) -> Settings:
@@ -119,6 +144,47 @@ class Settings(BaseSettings):
             raise ValueError("telephony_provider=twilio requires Twilio SID + auth token")
         if self.llm_max_keepalive_connections > self.llm_max_connections:
             raise ValueError("llm_max_keepalive_connections cannot exceed llm_max_connections")
+        if self.llm_provider == "huggingface" and self.environment == "prod":
+            if not self.huggingface_token:
+                raise ValueError("production Hugging Face serving requires a model-service token")
+            if not self.huggingface_model_revision:
+                raise ValueError("production Hugging Face serving requires an immutable revision")
+
+        if self.environment == "prod":
+            unsafe: list[str] = []
+            if self.demo_features_enabled:
+                unsafe.append("demo features are enabled")
+            if self.otp_code_for_demo:
+                unsafe.append("the demo OTP is configured")
+            if not self.allowed_origins:
+                unsafe.append("no browser origins are configured")
+            if any(urlsplit(origin).scheme != "https" for origin in self.allowed_origins):
+                unsafe.append("browser origins must use HTTPS")
+            if self.llm_provider == "mock":
+                unsafe.append("the mock LLM is selected")
+            if self.stt_provider == "mock" or self.tts_provider == "mock":
+                unsafe.append("mock speech is selected")
+            if self.embedding_provider in {"mock", "hash"}:
+                unsafe.append("a demo embedding provider is selected")
+            if self.vector_backend != "pgvector":
+                unsafe.append("pgvector is not selected")
+            if self.payment_provider == "mock":
+                unsafe.append("the mock payment provider is selected")
+            if self.payment_provider == "stripe" and not self.stripe_webhook_secret:
+                unsafe.append("the Stripe webhook secret is missing")
+            if self.telephony_provider != "none":
+                unsafe.append(
+                    "telephony cannot be enabled before webhook signature validation is installed"
+                )
+
+            database = urlsplit(self.database_url.replace("postgresql+asyncpg", "postgresql", 1))
+            if database.scheme not in {"postgresql", "postgres"}:
+                unsafe.append("PostgreSQL is required")
+            if (database.username, database.password) == ("insurance", "insurance"):
+                unsafe.append("default database credentials are configured")
+
+            if unsafe:
+                raise ValueError("unsafe production configuration: " + "; ".join(unsafe))
         return self
 
     @property

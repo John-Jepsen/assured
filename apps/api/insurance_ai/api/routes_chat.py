@@ -12,6 +12,7 @@ from insurance_ai.api.schemas import ChatRequest, ChatResponse, ChatSocketReques
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory, get_session
 from insurance_ai.observability import get_logger
+from insurance_ai.security.origin import websocket_origin_allowed
 from insurance_ai.security.session import get_session_store
 from insurance_ai.security.verification import VerificationClaim, verify_identity
 
@@ -67,6 +68,9 @@ async def verify(req: VerifyRequest, db: AsyncSession = Depends(get_session)) ->
 @router.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
     """Streaming chat: client sends {message, conversation_id}; server streams tokens."""
+    if not websocket_origin_allowed(ws.headers.get("origin")):
+        await ws.close(code=1008, reason="Origin not allowed")
+        return
     await ws.accept()
     try:
         while True:
