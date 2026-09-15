@@ -23,6 +23,7 @@ apps/web/.vite/
 *.sqlite
 *.sqlite3
 tests/.api_test.db
+*.db-journal
 
 # Model weights / caches (never commit)
 models/

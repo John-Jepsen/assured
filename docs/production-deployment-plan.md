@@ -15,9 +15,11 @@ interfaces. It is not ready to process real customer data. The release blockers 
 identity-provider/frontend integration, session revocation/logout semantics, administrator
 audit controls,
 production-scale model and retrieval validation, reproducible image supply-chain
-controls, and operational controls. Remote model serving, native pgvector retrieval,
-bounded channel inputs, consistent answer persistence, and hardened application images
-now provide the implementation foundation for those remaining gates.
+controls, and operational dashboards, alerts, and runbooks. Remote model serving, native
+pgvector retrieval, bounded channel inputs, consistent answer persistence, hardened
+application images, hash-locked dependency resolution, shared rate-limit counters, and
+baseline request and provider metrics now provide the implementation foundation for those
+remaining gates.
 
 The recommended model architecture is a dedicated inference service rather than loading
 Hugging Face `transformers` into each FastAPI worker. The API should call a private,
@@ -59,10 +61,18 @@ As of the review date:
 - The API and web images run as non-root with read-only filesystems, dropped Linux
   capabilities, and `no-new-privileges` in the Compose baseline.
 - A root `.dockerignore` reduces the integrated build contexts to less than 200 KB.
+- Every non-preflight `/api/*` HTTP request, WebSocket connection, and WebSocket turn
+  passes a fixed-window rate limit that fails closed and is reported by `/ready`; the
+  health and metrics probes are deliberately exempt. The counters are shared through Redis
+  only when `session_backend=redis`; any other backend degrades to a bounded per-process
+  limiter.
+- `/metrics` is off by default, requires its own bearer token, and renders a process-local
+  registry of HTTP and OpenAI-compatible-LLM RED metrics.
 - CI exercises mock providers, native pgvector, and hardened runtime image builds; it
-  blocks fixable critical image vulnerabilities and publishes SPDX JSON SBOMs. Dependency
-  hash locking, image signing, provenance, and a live production-model evaluation remain
-  open.
+  blocks fixable critical image vulnerabilities and publishes SPDX JSON SBOMs. The API
+  runtime image now installs from a hash-pinned `uv.lock`, but CI test jobs still resolve
+  dependencies unpinned and no job fails on lock drift. Image signing, provenance, and a
+  live production-model evaluation remain open.
 
 The highest-risk implementation gaps are:
 
@@ -72,12 +82,14 @@ The highest-risk implementation gaps are:
 | Conversation ownership | New conversations persist the stable OIDC subject and every customer channel rejects a different subject; authenticated access to legacy unowned rows fails closed | Migration/retention handling for legacy rows and reconnect/load testing remain open |
 | Session storage | Verification and pending actions use TTL-bound Redis records with per-conversation distributed mutation locks; memory remains a development backend | Authenticated logout/revocation and a full multi-replica transaction soak test remain open |
 | Demo identity | A fixed OTP and synthetic customer directory remain available in development, while production configuration rejects the OTP and disables the directory | Production identity still requires the planned OIDC/MFA integration |
+| Abuse controls | Per-IP and per-principal fixed-window limits bound every non-preflight `/api/*` request, every chat/voice socket connection, and every socket turn, returning 429 with `Retry-After` or close code 1013; the limiter fails closed, is included in readiness, and production configuration rejects a disabled or fail-open policy | Counters are only shared across replicas when `session_backend=redis`, so any other backend limits one process at a time; multi-replica abuse, soak, and external penetration testing remain open |
 | LLM runtime | The remote provider has bounded active/pending concurrency, queue timeout, jittered retry, and circuit-breaker fallback, but the pinned vLLM path is not capacity-tested | Approved limits, model quality, and GPU sizing are not yet established on target hardware |
 | Grounding validation | A conservative validator now protects amounts, identifiers, citations, URLs, critical insurance concepts, and polarity before output is released | Real-model adversarial evaluation and broader semantic-entailment coverage are still required |
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
-| Startup | Compose separates migrations, synthetic seeding, ingestion, and API serving into dependency-gated jobs | The selected production orchestrator still needs equivalent release jobs, concurrency protection, and content-versioned ingestion |
-| Readiness | `/ready` returns HTTP 503 when PostgreSQL, the configured session store, or the configured model is unavailable; an open model circuit also fails readiness | Production provider warmup and dependency failure injection remain open |
-| Supply chain | Base/service images and CI actions are immutable, Dependabot proposes reviewed updates, and CI scans both application images and emits SPDX SBOMs | Python hashes, signing, provenance, license policy, and registry enforcement remain open |
+| Startup | Compose separates migrations, synthetic seeding, ingestion, and API serving into dependency-gated jobs, and ingestion is incremental against a stored content/embedding fingerprint, serialized by a PostgreSQL advisory lock, and prunes removed documents | The selected production orchestrator still needs equivalent release jobs, migration concurrency protection, ingestion progress/rollback handling, and forward/rollback drills on a production-like copy |
+| Readiness | `/ready` returns HTTP 503 when PostgreSQL, the configured session store, the rate-limit store, or the configured model is unavailable; an open model circuit also fails readiness | Production provider warmup and dependency failure injection remain open |
+| Supply chain | Base/service images, CI actions, and the `uv` resolver are immutable, the API image installs a non-editable environment from a hash-pinned `uv.lock` with `uv sync --frozen`, Dependabot proposes reviewed updates, and CI scans both application images and emits SPDX SBOMs | CI test jobs still install unpinned and no job fails on lock drift; signing, provenance, license policy, and registry enforcement remain open |
+| Observability | One validated `x-request-id` per HTTP and WebSocket connection is bound to every structured log line and echoed on the response, and an off-by-default, separately authenticated `/metrics` endpoint exports HTTP and OpenAI-compatible-LLM RED metrics | Metrics are process-local, so a scrape reaches one worker; STT, TTS, and embedding providers are uninstrumented; first-token latency, first-audio latency, active streams, grounding fallbacks, and GPU signals are missing; request IDs are not forwarded to model, speech, or external calls; and no dashboards, alerts, or runbooks exist |
 
 ## Target architecture
 

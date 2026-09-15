@@ -47,6 +47,23 @@ All notable changes to this project are documented here.
   registry digests, GitHub Actions are pinned to exact commits, Dependabot covers Python,
   npm, Docker, and workflow dependencies, and CI blocks fixable critical image findings
   while publishing SPDX JSON SBOMs for both application images.
+- **Per-IP and per-principal rate limits.** Fixed-window counters bound every `/api/`
+  HTTP request by source IP, authenticated customer and admin requests by subject, and
+  chat/voice WebSockets on both handshake and per-turn actions. Counters are shared
+  across replicas through Redis (bounded in-process otherwise), identifiers are hashed
+  before they reach the store, the backend is checked by readiness, and the failure
+  policy is explicit and fails closed by default.
+- **RED metrics and a protected scrape endpoint.** A dependency-free Prometheus registry
+  records HTTP request counts, durations, and in-flight requests by method/route/status,
+  plus provider operation outcomes, durations, model queue rejections, and admitted model
+  requests. `/metrics` stays absent until explicitly enabled, and then answers only a
+  bearer token compared in constant time.
+- **Idempotent versioned knowledge ingestion.** Ingestion now keys each document on a
+  content hash plus an embedding fingerprint covering provider, model, dimension, and
+  chunking, so unchanged files are skipped, changed files have only their own chunks
+  re-embedded, and removed files are deleted. Concurrent runs serialize on a Postgres
+  advisory lock, and bootstrap always runs ingestion instead of skipping a populated
+  table.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

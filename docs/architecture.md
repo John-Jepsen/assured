@@ -135,3 +135,13 @@ structured logs, so a turn can be traced end to end across router, specialist,
 tools, RAG, and providers. Latency is tracked per stage — speech-end →
 transcript, transcript → first token, first token → first audio, and speech-end
 → first audio — and surfaced in the admin view for tuning the voice pipeline.
+
+An ASGI middleware wraps every HTTP request and WebSocket connection: it accepts a
+caller-supplied `x-request-id` when it matches a strict pattern, otherwise mints one,
+binds it to the structured-logging context, and echoes it on the HTTP response. The same
+middleware records request counts, duration histograms, and an in-flight gauge, and the
+OpenAI-compatible LLM provider records its own request counts, durations, queue
+rejections, and active-request gauge. `GET /metrics` renders them in Prometheus text
+format when `INSURANCE_AI_METRICS_ENABLED` is set and the caller presents the configured
+bearer token. The registry is process-local, so a collector must scrape every worker and
+replica and aggregate across them.

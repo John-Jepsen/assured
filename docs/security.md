@@ -131,6 +131,28 @@ rather than inventing coverage.
 
 ---
 
+## Rate Limiting
+
+Abuse control sits in front of the agent, not inside it. Every non-preflight
+`/api/*` HTTP request is bounded by source IP; the health and metrics probes
+are deliberately exempt so they stay reachable during an incident.
+Authenticated customer and admin routes add a per-principal bound keyed on the
+OIDC subject, and each chat or voice WebSocket is bounded twice — once when the
+connection is opened, and again on every chat turn or completed utterance, so
+an accepted socket cannot become an unbounded generation loop. Exceeding a
+limit returns HTTP 429 with `Retry-After`, or closes the socket with code 1013.
+
+Counters are fixed-window and keyed by a SHA-256 digest of the subject or client
+address, so no raw identifier reaches the counter store. With
+`session_backend=redis` the counters live in Redis and are shared by every API
+replica; any other backend falls back to a bounded per-process limiter that only
+protects a single worker. Production configuration therefore requires Redis, and
+rejects both a disabled limiter and a fail-open policy. If the counter store is
+unreachable the limiter fails closed by default and `/ready` reports the API as
+not ready.
+
+---
+
 ## Secrets Handling
 
 - All credentials (LLM/STT/TTS provider keys, Twilio, Stripe test keys) are read
@@ -149,6 +171,10 @@ rather than inventing coverage.
   retrieval sources — without exposing raw sensitive identifiers.
 - No payment card data is ever stored; payments use a mock provider by default
   and a Stripe test-mode adapter otherwise.
+- The Prometheus `/metrics` endpoint is disabled unless explicitly enabled,
+  requires its own bearer token rather than a customer or admin session, and
+  carries only fixed low-cardinality labels (HTTP method, route template, status,
+  provider, operation, outcome) so no identifier enters the metrics store.
 
 ---
 
