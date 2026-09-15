@@ -28,6 +28,19 @@ def test_readiness_returns_503_when_database_is_unavailable(api_client, monkeypa
     assert response.json() == {"ready": False}
 
 
+def test_readiness_returns_503_when_session_store_is_unavailable(api_client, monkeypatch):
+    from insurance_ai.api import routes_health
+
+    class UnavailableStore:
+        async def ping(self):
+            return False
+
+    monkeypatch.setattr(routes_health, "get_session_store", lambda: UnavailableStore())
+    response = api_client.get("/ready")
+    assert response.status_code == 503
+    assert response.json() == {"ready": False}
+
+
 def test_chat_rejects_blank_and_oversized_messages(api_client):
     assert api_client.post("/api/chat", json={"message": "   "}).status_code == 422
     assert api_client.post("/api/chat", json={"message": "x" * 8_001}).status_code == 422

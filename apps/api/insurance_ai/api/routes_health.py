@@ -9,6 +9,7 @@ from insurance_ai import __version__
 from insurance_ai.api.schemas import HealthStatus
 from insurance_ai.config import get_settings
 from insurance_ai.db.base import get_engine
+from insurance_ai.security.session import get_session_store
 
 router = APIRouter(tags=["health"])
 
@@ -44,10 +45,12 @@ async def health() -> HealthStatus:
 
 @router.get("/ready")
 async def ready(response: Response) -> dict:
-    """Report readiness and use a non-success status when the database is unavailable."""
+    """Report readiness only when the database and durable session store respond."""
     try:
         async with get_engine().connect() as conn:
             await conn.execute(text("SELECT 1"))
+        if not await get_session_store().ping():
+            raise RuntimeError("session store unavailable")
         return {"ready": True}
     except Exception:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

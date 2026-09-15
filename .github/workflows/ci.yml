@@ -50,9 +50,17 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U insurance -d insurance_ai"
           --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       INSURANCE_AI_DATABASE_URL: postgresql+asyncpg://insurance:insurance@localhost:5432/insurance_ai
       INSURANCE_AI_TEST_DATABASE_URL: postgresql+asyncpg://insurance:insurance@localhost:5432/insurance_ai
+      INSURANCE_AI_TEST_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -65,8 +73,8 @@ jobs:
           pip install -e ".[dev]"
       - name: Run evaluation suite (38 cases)
         run: python -m insurance_ai.evals.runner
-      - name: Verify native pgvector retrieval
-        run: python -m pytest -q ../../tests/test_retriever.py
+      - name: Verify native pgvector retrieval and Redis session continuity
+        run: python -m pytest -q ../../tests/test_retriever.py ../../tests/test_session_store.py
 
   frontend:
     name: Frontend — type-check + build
@@ -103,7 +111,7 @@ jobs:
             --tmpfs /tmp:rw,noexec,nosuid,size=64m \
             --cap-drop ALL --security-opt no-new-privileges:true \
             --entrypoint python assured-api:ci -c \
-            "import importlib.util, os; import alembic, insurance_ai, scripts.bootstrap; assert os.getuid() != 0; assert importlib.util.find_spec('pytest') is None; assert importlib.util.find_spec('ruff') is None"
+            "import importlib.util, os; import alembic, insurance_ai, redis, scripts.bootstrap; assert os.getuid() != 0; assert importlib.util.find_spec('pytest') is None; assert importlib.util.find_spec('ruff') is None"
       - name: Build web image
         run: docker build --file docker/web.Dockerfile --tag assured-web:ci .
       - name: Check web runtime

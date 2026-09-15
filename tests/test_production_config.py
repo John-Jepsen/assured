@@ -30,6 +30,8 @@ def _production_settings(**overrides) -> Settings:
         "stripe_secret_key": "sk_test_placeholder",
         "stripe_webhook_secret": "whsec_placeholder",
         "telephony_provider": "none",
+        "session_backend": "redis",
+        "redis_url": "rediss://:strong-redis-secret@redis.internal:6379/0",
     }
     values.update(overrides)
     return Settings(**values)

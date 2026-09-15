@@ -10,7 +10,8 @@ The platform serves two entry channels — a web app (text and browser voice)
 and a phone channel (telephony audio) — through a single FastAPI backend. The
 backend runs a deterministic intent router that dispatches to specialist
 agents, which invoke authorized tools and a retrieval-augmented generation
-(RAG) knowledge base. State and embeddings persist in Postgres with pgvector.
+(RAG) knowledge base. Domain state and embeddings persist in Postgres with pgvector;
+expiring verification and pending-transaction state uses Redis with distributed locks.
 Speech-to-text (STT) and text-to-speech (TTS) providers sit behind interfaces
 so the same core logic drives both channels.
 
@@ -44,8 +45,10 @@ flowchart TB
     end
 
     DB[("Postgres + pgvector<br/>(numpy cosine fallback)")]
+    Session[("Redis<br/>sessions + locks")]
 
     Web -->|HTTP / WS| API
+    API --> Session
     Twilio -->|WS audio| API
     API --> STT
     API --> Router
@@ -96,7 +99,8 @@ invent coverage.
   config with mock defaults for local/test.
 - **Persistence** — Postgres + pgvector in Docker; a numpy cosine fallback backs
   local and test runs. Embeddings are stored as JSON float arrays (pgvector
-  column in production).
+  column in production). Redis carries TTL-bound verification and pending-action
+  sessions across API replicas, with a per-conversation distributed mutation lock.
 - **Speech** — faster-whisper for near-streaming STT; Piper (default) or Kokoro
   for streaming per-sentence TTS.
 - **Telephony** — Twilio Media Streams over WebSocket, abstracted so core logic
@@ -105,10 +109,11 @@ invent coverage.
 - **Payments** — mock provider by default (amounts ending in `.99` simulate a
   decline) plus a Stripe test-mode adapter. No card data is stored.
 
-## Why one backend + frontend + Postgres
+## Why one backend + frontend + shared data services
 
 The system is intentionally consolidated into a single FastAPI backend, one
-React frontend, and one Postgres instance rather than a fleet of microservices.
+React frontend, one Postgres instance, and Redis rather than a fleet of application
+microservices.
 This means fewer containers to build, run, and reason about; a single async
 process where the router, agents, tools, and RAG share memory and types without
 network hops; and one database for both relational state and vector search via

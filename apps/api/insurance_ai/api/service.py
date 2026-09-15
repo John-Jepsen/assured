@@ -1,6 +1,6 @@
 """Conversation service — ties orchestrator to persistence + session state.
 
-Responsibilities: create/load a conversation, keep the in-memory Session in sync
+Responsibilities: create/load a conversation, keep the durable Session in sync
 with the persisted verification state, run the orchestrator, persist the user and
 assistant messages with their execution trace, and record ToolExecution rows.
 """
@@ -17,7 +17,7 @@ from insurance_ai.agents.orchestrator import Orchestrator, OrchestratorResult
 from insurance_ai.db.models import Conversation, Message, ToolExecution
 from insurance_ai.domain.enums import MessageRole
 from insurance_ai.observability import get_logger
-from insurance_ai.security.session import Session, get_session_store
+from insurance_ai.security.session import Session, SessionStore, get_session_store
 
 log = get_logger("service")
 
@@ -42,7 +42,11 @@ class PreparedTurn:
 class ConversationService:
     def __init__(self, orchestrator: Orchestrator | None = None) -> None:
         self.orchestrator = orchestrator or Orchestrator()
-        self.sessions = get_session_store()
+
+    @property
+    def sessions(self) -> SessionStore:
+        """Resolve the lifecycle-managed store without retaining a closed Redis client."""
+        return get_session_store()
 
     async def get_or_create_conversation(
         self,
@@ -62,12 +66,6 @@ class ConversationService:
         await db.refresh(conv)
         return conv
 
-    def _sync_session(self, conv: Conversation) -> Session:
-        sess = self.sessions.get(conv.id)
-        if conv.customer_id and not sess.customer_id:
-            sess.customer_id = conv.customer_id
-        return sess
-
     async def prepare_message(
         self,
         db: AsyncSession,
@@ -78,35 +76,41 @@ class ConversationService:
         request_id: str = "req",
     ) -> PreparedTurn:
         conv = await self.get_or_create_conversation(db, conversation_id, channel=channel)
-        sess = self._sync_session(conv)
+        async with self.sessions.locked(conv.id) as sess:
+            if conv.customer_id and not sess.customer_id:
+                sess.customer_id = conv.customer_id
 
-        # persist user message
-        db.add(Message(conversation_id=conv.id, role=MessageRole.USER, content=message))
-        await db.commit()
+            # The user message and every state-changing tool execute inside the same
+            # per-conversation lock as session mutation.
+            db.add(Message(conversation_id=conv.id, role=MessageRole.USER, content=message))
+            await db.commit()
 
-        async def sink(record: dict[str, Any]) -> None:
-            db.add(
-                ToolExecution(
-                    conversation_id=conv.id,
-                    tool_name=record["tool_name"],
-                    arguments=record.get("arguments", {}),
-                    result=record.get("result", {}),
-                    ok=record.get("ok", True),
-                    error_code=record.get("error_code"),
-                    latency_ms=record.get("latency_ms", 0.0),
+            async def sink(record: dict[str, Any]) -> None:
+                db.add(
+                    ToolExecution(
+                        conversation_id=conv.id,
+                        tool_name=record["tool_name"],
+                        arguments=record.get("arguments", {}),
+                        result=record.get("result", {}),
+                        ok=record.get("ok", True),
+                        error_code=record.get("error_code"),
+                        latency_ms=record.get("latency_ms", 0.0),
+                    )
                 )
+
+            result = await self.orchestrator.run(
+                db, sess, message, request_id=request_id, log_sink=sink
             )
 
-        result = await self.orchestrator.run(
-            db, sess, message, request_id=request_id, log_sink=sink
-        )
-
-        # sync persisted conversation state from session
-        conv.verification_status = sess.verification_status
-        conv.current_agent = result.trace.agents[0] if result.trace.agents else "orchestrator"
-        conv.escalated = sess.escalated or conv.escalated
-        conv.customer_id = sess.customer_id or conv.customer_id
-        await db.commit()
+            # Sync the auditable conversation projection before the session lock is
+            # released and its updated state is persisted with a fresh TTL.
+            conv.verification_status = sess.verification_status
+            conv.current_agent = (
+                result.trace.agents[0] if result.trace.agents else "orchestrator"
+            )
+            conv.escalated = sess.escalated or conv.escalated
+            conv.customer_id = sess.customer_id or conv.customer_id
+            await db.commit()
         return PreparedTurn(result=result, session=sess, conversation=conv)
 
     async def finish_message(

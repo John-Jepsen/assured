@@ -22,6 +22,7 @@ EmbeddingProviderName = Literal["mock", "hash", "sentence-transformers", "openai
 VectorBackend = Literal["numpy", "pgvector"]
 PaymentProviderName = Literal["mock", "stripe"]
 TelephonyProviderName = Literal["none", "twilio"]
+SessionBackend = Literal["memory", "redis"]
 
 
 class Settings(BaseSettings):
@@ -109,7 +110,11 @@ class Settings(BaseSettings):
     # --- security ----------------------------------------------------------
     verification_max_attempts: int = 3
     otp_code_for_demo: str | None = "123456"  # deterministic demo OTP (synthetic)
-    session_ttl_seconds: int = 3600
+    session_backend: SessionBackend = "memory"
+    redis_url: str | None = None
+    session_ttl_seconds: int = Field(default=3600, gt=0)
+    session_lock_timeout_seconds: int = Field(default=180, gt=0)
+    session_lock_blocking_timeout_seconds: int = Field(default=10, gt=0)
 
     @field_validator("allowed_origins")
     @classmethod
@@ -144,6 +149,8 @@ class Settings(BaseSettings):
             raise ValueError("telephony_provider=twilio requires Twilio SID + auth token")
         if self.llm_max_keepalive_connections > self.llm_max_connections:
             raise ValueError("llm_max_keepalive_connections cannot exceed llm_max_connections")
+        if self.session_backend == "redis" and not self.redis_url:
+            raise ValueError("session_backend=redis requires INSURANCE_AI_REDIS_URL")
         if self.llm_provider == "huggingface" and self.environment == "prod":
             if not self.huggingface_token:
                 raise ValueError("production Hugging Face serving requires a model-service token")
@@ -176,6 +183,14 @@ class Settings(BaseSettings):
                 unsafe.append(
                     "telephony cannot be enabled before webhook signature validation is installed"
                 )
+            if self.session_backend != "redis":
+                unsafe.append("the process-local session backend is selected")
+
+            redis = urlsplit(self.redis_url or "")
+            if self.session_backend == "redis" and redis.scheme not in {"redis", "rediss"}:
+                unsafe.append("a valid Redis URL is required")
+            if redis.password in {None, "", "insurance-demo"}:
+                unsafe.append("Redis credentials are missing or use the demo default")
 
             database = urlsplit(self.database_url.replace("postgresql+asyncpg", "postgresql", 1))
             if database.scheme not in {"postgresql", "postgres"}:

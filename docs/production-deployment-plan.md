@@ -12,7 +12,7 @@ containerized production service with a Hugging Face-hosted model.
 Assured has a good demonstration baseline: the API and web app build as containers,
 the test suite covers deterministic agent behavior, and providers are isolated behind
 interfaces. It is not ready to process real customer data. The release blockers are
-application authentication, durable session state, demo-only identity controls,
+application authentication, session revocation/logout semantics, demo-only identity controls,
 production-scale model and retrieval validation, reproducible image supply-chain
 controls, and operational controls. Remote model serving, native pgvector retrieval,
 bounded channel inputs, consistent answer persistence, and hardened application images
@@ -49,8 +49,8 @@ organizational approval.
 
 As of the review date:
 
-- 58 backend tests pass, the opt-in pgvector integration test passes against PostgreSQL,
-  and Ruff reports no findings.
+- 83 backend tests pass, the opt-in pgvector and Redis integration tests pass against
+  their real services, and Ruff reports no findings.
 - Docker Compose validates, and the API and web images build.
 - The frontend TypeScript/Vite production build succeeds.
 - The standard API image intentionally does not contain `torch` or `transformers`; the
@@ -67,13 +67,13 @@ The highest-risk implementation gaps are:
 |---|---|---|
 | Authentication | Customer and admin routes have no application identity | Conversation and operational data can be accessed without a trusted principal |
 | Conversation ownership | A caller can submit an arbitrary existing conversation ID | A leaked or discovered ID can be used to attach to another conversation |
-| Session storage | Verification and pending actions are held in process memory | State is lost on restart and differs across workers or replicas |
+| Session storage | Verification and pending actions use TTL-bound Redis records with per-conversation distributed mutation locks; memory remains a development backend | Authenticated logout/revocation and a full multi-replica transaction soak test remain open |
 | Demo identity | A fixed OTP and synthetic customer directory remain available in development, while production configuration rejects the OTP and disables the directory | Production identity still requires the planned OIDC/MFA integration |
 | LLM runtime | A remote-provider and vLLM foundation exists but is not capacity-tested | Safe concurrency, model quality, and GPU sizing are not yet established |
 | Grounding validation | A conservative validator now protects amounts, identifiers, citations, URLs, critical insurance concepts, and polarity before output is released | Real-model adversarial evaluation and broader semantic-entailment coverage are still required |
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
 | Startup | Compose separates migrations, synthetic seeding, ingestion, and API serving into dependency-gated jobs | The selected production orchestrator still needs equivalent release jobs, concurrency protection, and content-versioned ingestion |
-| Readiness | `/ready` returns HTTP 503 when PostgreSQL is unavailable, but does not yet cover the session store, model service, or production-configuration validity | An orchestrator can still route traffic to a partially functional instance |
+| Readiness | `/ready` returns HTTP 503 when PostgreSQL or the configured session store is unavailable | Model-service connectivity and provider warmup are not yet included |
 | Supply chain | Runtime image checks exist, but dependencies/tags remain broad and images are not scanned or signed | Builds are not fully reproducible and dependency changes can reach production unreviewed |
 
 ## Target architecture

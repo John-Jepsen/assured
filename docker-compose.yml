@@ -14,6 +14,8 @@ x-api-runtime: &api-runtime
       required: false
   environment: &api-environment
     INSURANCE_AI_DATABASE_URL: postgresql+asyncpg://insurance:insurance@postgres:5432/insurance_ai
+    INSURANCE_AI_SESSION_BACKEND: redis
+    INSURANCE_AI_REDIS_URL: redis://:${REDIS_PASSWORD:-insurance-demo}@redis:6379/0
   volumes:
     - modelcache:/models
   init: true
@@ -44,6 +46,35 @@ services:
       retries: 10
       start_period: 10s
 
+  redis:
+    image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    user: "999:1000"
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-insurance-demo}"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - "${REDIS_PASSWORD:-insurance-demo}"
+    volumes:
+      - redisdata:/data
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   migrate:
     <<: *api-runtime
     command: ["alembic", "upgrade", "head"]
@@ -73,6 +104,8 @@ services:
     depends_on:
       ingest:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     ports:
       - "${API_PORT:-8000}:8000"
 
@@ -97,4 +130,5 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
   modelcache:

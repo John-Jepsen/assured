@@ -28,6 +28,10 @@ All notable changes to this project are documented here.
   mock providers, non-pgvector retrieval, default database credentials, insecure browser
   origins, unsigned Stripe webhooks, and unverified telephony; HTTP and browser
   WebSockets enforce the same exact origin allowlist.
+- **Durable session state.** Added TTL-bound Redis sessions, cross-replica serialization,
+  per-conversation distributed locks around verification and state-changing tools,
+  lifecycle cleanup, readiness checks, a hardened Redis Compose service, and real-Redis
+  continuity/concurrency coverage.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

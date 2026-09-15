@@ -39,13 +39,15 @@ flowchart TD
     SPEC --> RAG[RAG retriever]
     AUTHZ --> TOOLS[25 typed tools<br/>authorized + logged]
     TOOLS --> DB[(PostgreSQL)]
+    API --> SESSION[(Redis sessions + locks)]
     RAG --> VEC[(pgvector / numpy-BM25)]
     TOOLS --> FACTS[Verified facts] --> LLM[LLM composer<br/>phrasing only]
     RAG --> FACTS
 ```
 
 One async **FastAPI** backend (agents, tools, RAG, speech, telephony, payments), a
-**React** frontend, and **PostgreSQL** (pgvector, with a numpy/BM25 fallback) —
+**React** frontend, **PostgreSQL** (pgvector, with a numpy/BM25 fallback), and Redis for
+expiring multi-replica session state —
 deliberately consolidated: fewer moving parts than a service-per-concern split, same
 capability. ~6.8k lines of Python.
 
@@ -117,11 +119,12 @@ Providers are config-selected (`.env`); see [model setup](#model-providers).
 ## Verify it
 
 ```bash
-make test   # 58 tests: unit + API + WebSocket + voice + payments + evals (SQLite, mock providers)
+make test   # 83 tests: unit + API + WebSocket + voice + payments + evals (SQLite, mock providers)
 make eval   # 38 eval cases through the real orchestrator; report persisted to the DB + admin UI
 ```
 
-The pgvector suite also has an opt-in real-Postgres integration test. Tests assert
+The pgvector and session-store suites also have opt-in real Postgres/Redis integration
+tests. Tests assert
 **behavior**, not implementation: an unverified user cannot read policy
 details, cross-customer access fails, barge-in cancels the in-flight response. Evals
 (routing, policy, claims, billing, security, rag, conversations) check routing, tool

@@ -37,25 +37,26 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_session)) -> Cha
 @router.post("/verify")
 async def verify(req: VerifyRequest, db: AsyncSession = Depends(get_session)) -> dict:
     """Deterministic verification endpoint (never routed through the LLM)."""
-    sess = get_session_store().get(req.conversation_id)
-    result = await verify_identity(
-        db,
-        sess,
-        VerificationClaim(
-            last_name=req.last_name,
-            zip_code=req.zip_code,
-            policy_number=req.policy_number,
-            date_of_birth=req.date_of_birth,
-            otp_code=req.otp_code,
-        ),
-    )
-    from insurance_ai.db.models import Conversation
+    store = get_session_store()
+    async with store.locked(req.conversation_id) as sess:
+        result = await verify_identity(
+            db,
+            sess,
+            VerificationClaim(
+                last_name=req.last_name,
+                zip_code=req.zip_code,
+                policy_number=req.policy_number,
+                date_of_birth=req.date_of_birth,
+                otp_code=req.otp_code,
+            ),
+        )
+        from insurance_ai.db.models import Conversation
 
-    conv = await db.get(Conversation, req.conversation_id)
-    if conv:
-        conv.verification_status = sess.verification_status
-        conv.customer_id = sess.customer_id or conv.customer_id
-        await db.commit()
+        conv = await db.get(Conversation, req.conversation_id)
+        if conv:
+            conv.verification_status = sess.verification_status
+            conv.customer_id = sess.customer_id or conv.customer_id
+            await db.commit()
     return {
         "status": result.status,
         "verified": sess.is_verified,
