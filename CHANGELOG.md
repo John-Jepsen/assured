@@ -17,6 +17,10 @@ All notable changes to this project are documented here.
 - **Hardened runtime containers.** API and web images now run as non-root with read-only
   filesystems, dropped capabilities, minimal runtime dependencies, strict builds, small
   Docker contexts, and CI runtime-security checks.
+- **Grounded generation guardrail.** Model rewrites are buffered and checked for changed
+  or invented amounts, identifiers, citations, URLs, critical insurance concepts, and
+  polarity before any text reaches chat or speech; unsafe output falls back to the
+  deterministic grounded draft with trace metadata.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

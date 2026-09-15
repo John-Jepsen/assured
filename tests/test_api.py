@@ -86,6 +86,7 @@ def test_ws_chat_streams_tokens(api_client):
             elif msg["type"] == "done":
                 assert "rental" in msg["answer"].lower()
                 assert "".join(tokens).strip() == msg["answer"].strip()
+                assert msg["trace"]["generation"]["grounding_validated"] is True
                 break
         assert len(tokens) > 3
 
@@ -108,7 +109,7 @@ def test_ws_voice_pipeline_and_metrics(api_client):
             elif t == "metrics":
                 got_metrics = "speech_end_to_first_audio_ms" in msg
             elif t == "done":
-                got_done = True
+                got_done = msg["trace"]["generation"]["grounding_validated"] is True
                 break
         assert got_transcript and got_audio and got_metrics and got_done
 
@@ -160,8 +161,13 @@ async def test_non_streaming_turn_persists_model_rendered_answer(db):
         async def stream(
             self, messages: list[ChatMessage], **kwargs
         ) -> AsyncIterator[str]:
-            yield "Model-rendered "
-            yield "answer."
+            grounded = next(
+                message.content.split("Grounded facts — phrase these concisely and add NOTHING else:\n", 1)[1]
+                for message in messages
+                if message.content.startswith("Grounded facts —")
+            )
+            yield "In short: "
+            yield grounded
 
     providers = Providers(Settings())
     providers.llm = RewritingLLM()
@@ -172,10 +178,13 @@ async def test_non_streaming_turn_persists_model_rendered_answer(db):
     )
     transcript = await service.transcript(db, conversation.id)
 
-    assert result.answer == "Model-rendered answer."
+    assert result.answer.startswith("In short: ")
     assert result.trace.model == {
         "provider": "test-rewriter",
         "model": "test-model",
         "revision": "test-revision",
     }
     assert transcript[-1]["content"] == result.answer
+    assert result.trace.generation is not None
+    assert result.trace.generation["grounding_validated"] is True
+    assert result.trace.generation["fallback_used"] is False

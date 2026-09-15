@@ -32,6 +32,13 @@ export interface Trace {
     model: string;
     revision?: string | null;
   } | null;
+  generation?: {
+    grounding_validated: boolean;
+    fallback_used: boolean;
+    validation_failures: string[];
+    checks: Record<string, boolean>;
+    error_type?: string;
+  } | null;
 }
 
 export interface HealthResponse {
@@ -196,6 +203,7 @@ export interface WsChatDone {
   type: "done";
   answer: string;
   sources: Source[];
+  trace: Trace;
 }
 export interface WsChatError {
   type: "error";

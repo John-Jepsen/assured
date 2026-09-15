@@ -70,7 +70,7 @@ The highest-risk implementation gaps are:
 | Session storage | Verification and pending actions are held in process memory | State is lost on restart and differs across workers or replicas |
 | Demo identity | A fixed OTP and a public synthetic customer directory are enabled | Demo controls cannot be allowed in a real environment |
 | LLM runtime | A remote-provider and vLLM foundation exists but is not capacity-tested | Safe concurrency, model quality, and GPU sizing are not yet established |
-| Grounding validation | All channels now return and persist the same model-rendered answer, with deterministic fallback on provider failure, but rewritten output is not yet checked fact-by-fact against the grounded draft | A fluent rewrite could introduce an unsupported detail before the planned validator is implemented |
+| Grounding validation | A conservative validator now protects amounts, identifiers, citations, URLs, critical insurance concepts, and polarity before output is released | Real-model adversarial evaluation and broader semantic-entailment coverage are still required |
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
 | Startup | Every API replica runs migrations and knowledge ingestion | Deployments can race and model-backed ingestion delays every replica startup |
 | Readiness | `/ready` returns HTTP 503 when PostgreSQL is unavailable, but does not yet cover the session store, model service, or production-configuration validity | An orchestrator can still route traffic to a partially functional instance |

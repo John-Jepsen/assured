@@ -106,7 +106,12 @@ async def ws_chat(ws: WebSocket) -> None:
                     db, turn, "".join(rendered)
                 )
                 await ws.send_json(
-                    {"type": "done", "answer": result.answer, "sources": result.trace.sources}
+                    {
+                        "type": "done",
+                        "answer": result.answer,
+                        "sources": result.trace.sources,
+                        "trace": result.trace.as_dict(),
+                    }
                 )
     except WebSocketDisconnect:
         log.info("ws_chat_disconnect")

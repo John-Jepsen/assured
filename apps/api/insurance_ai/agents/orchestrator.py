@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from insurance_ai.agents.composer import compose
+from insurance_ai.agents.grounding import GroundingValidation, validate_grounded_rewrite
 from insurance_ai.agents.intent import detect, reply_polarity
 from insurance_ai.agents.specialists import (
     _CANCEL_RE,
@@ -25,11 +26,14 @@ from insurance_ai.agents.specialists import (
 )
 from insurance_ai.config import get_settings
 from insurance_ai.domain.enums import AgentName, VerificationStatus
+from insurance_ai.observability import get_logger
 from insurance_ai.providers.base import ChatMessage
 from insurance_ai.providers.factory import Providers, get_providers
 from insurance_ai.security.session import Session
 from insurance_ai.security.verification import VerificationClaim, verify_identity
 from insurance_ai.tools.base import Source, ToolContext
+
+log = get_logger("orchestrator")
 
 
 @dataclass
@@ -44,6 +48,7 @@ class Trace:
     escalated: bool = False
     latencies_ms: dict[str, float] = field(default_factory=dict)
     model: dict[str, str | None] | None = None
+    generation: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +62,7 @@ class Trace:
             "escalated": self.escalated,
             "latencies_ms": self.latencies_ms,
             "model": self.model,
+            "generation": self.generation,
         }
 
 
@@ -257,10 +263,48 @@ class Orchestrator:
     async def stream_result(
         self, result: OrchestratorResult, message: str
     ) -> AsyncIterator[str]:
-        """Phrase and stream a planned result through the configured LLM provider."""
-        async for token in self.stream_answer(
-            result.answer, message, self.system_prompt_for(result)
-        ):
+        """Render, validate, then stream only grounded output to the caller.
+
+        Validation necessarily completes before the first token is released. This
+        prevents a hallucinated prefix from reaching chat or TTS before a later
+        validation failure is discovered.
+        """
+        draft = result.answer
+        chunks: list[str] = []
+        try:
+            async for token in self.stream_answer(draft, message, self.system_prompt_for(result)):
+                chunks.append(token)
+            rendered = "".join(chunks).strip()
+            validation = validate_grounded_rewrite(draft, rendered)
+            if validation.valid:
+                result.trace.generation = validation.trace_metadata(fallback_used=False)
+                safe_chunks = chunks
+            else:
+                result.trace.generation = validation.trace_metadata(fallback_used=True)
+                log.warning(
+                    "llm_rewrite_validation_fallback",
+                    failures=list(validation.failures),
+                    provider=self.providers.llm.name,
+                )
+                safe_chunks = _stream_chunks(draft)
+        except Exception as exc:
+            validation = GroundingValidation(
+                valid=False,
+                failures=("provider_error",),
+                checks={"provider_completed": False},
+            )
+            result.trace.generation = validation.trace_metadata(
+                fallback_used=True,
+                error_type=type(exc).__name__,
+            )
+            log.warning(
+                "llm_rewrite_provider_fallback",
+                error_type=type(exc).__name__,
+                provider=self.providers.llm.name,
+            )
+            safe_chunks = _stream_chunks(draft)
+
+        for token in safe_chunks:
             yield token
 
     async def complete_result(self, result: OrchestratorResult, message: str) -> str:
@@ -277,3 +321,8 @@ def _source_dict(s: Source) -> dict[str, Any]:
         "score": s.score,
         "snippet": s.snippet,
     }
+
+
+def _stream_chunks(text: str) -> list[str]:
+    """Split deterministic fallbacks into the same token-like chunks as MockLLM."""
+    return re.findall(r"\S+\s*", text)
