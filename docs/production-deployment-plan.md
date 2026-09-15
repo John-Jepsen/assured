@@ -50,7 +50,7 @@ organizational approval.
 
 As of the review date:
 
-- 96 backend tests pass, the opt-in pgvector and Redis integration tests pass against
+- 98 backend tests pass, the opt-in pgvector and Redis integration tests pass against
   their real services, and Ruff reports no findings.
 - Docker Compose validates, and the API and web images build.
 - The frontend TypeScript/Vite production build succeeds.
@@ -74,7 +74,7 @@ The highest-risk implementation gaps are:
 | Grounding validation | A conservative validator now protects amounts, identifiers, citations, URLs, critical insurance concepts, and polarity before output is released | Real-model adversarial evaluation and broader semantic-entailment coverage are still required |
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
 | Startup | Compose separates migrations, synthetic seeding, ingestion, and API serving into dependency-gated jobs | The selected production orchestrator still needs equivalent release jobs, concurrency protection, and content-versioned ingestion |
-| Readiness | `/ready` returns HTTP 503 when PostgreSQL or the configured session store is unavailable | Model-service connectivity and provider warmup are not yet included |
+| Readiness | `/ready` returns HTTP 503 when PostgreSQL, the configured session store, or the configured model is unavailable; an open model circuit also fails readiness | Production provider warmup and dependency failure injection remain open |
 | Supply chain | Runtime image checks exist, but dependencies/tags remain broad and images are not scanned or signed | Builds are not fully reproducible and dependency changes can reach production unreviewed |
 
 ## Target architecture

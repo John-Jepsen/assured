@@ -65,6 +65,25 @@ async def test_huggingface_provider_uses_remote_endpoint_and_exposes_metadata():
 
 
 @pytest.mark.asyncio
+async def test_remote_provider_readiness_requires_the_configured_model():
+    response_data: dict[str, object] = {
+        "value": {"data": [{"id": "Qwen/Qwen2.5-1.5B-Instruct"}]}
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "http://model.internal:8000/v1/models"
+        return httpx.Response(200, json=response_data["value"])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatLLM(_settings(), client=client)
+        assert await provider.ready()
+        response_data["value"] = {"data": []}
+        assert not await provider.ready()
+        response_data["value"] = {"data": ["malformed"]}
+        assert not await provider.ready()
+
+
+@pytest.mark.asyncio
 async def test_complete_retries_transient_status_with_a_bounded_attempt_count():
     attempts = 0
 

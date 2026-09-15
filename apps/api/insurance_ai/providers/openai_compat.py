@@ -121,6 +121,24 @@ class OpenAICompatLLM(LLMProvider):
         if self._owns_client:
             await self._client.aclose()
 
+    async def ready(self) -> bool:
+        """Check the OpenAI-compatible model catalog without changing breaker state."""
+        if self._circuit_open_until > self._clock():
+            return False
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/models",
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            models = payload.get("data", [])
+            return isinstance(models, list) and any(
+                isinstance(model, dict) and model.get("id") == self.model for model in models
+            )
+        except (httpx.HTTPError, TypeError, ValueError):
+            return False
+
     @asynccontextmanager
     async def _admission(self):
         limit = self.settings.llm_max_concurrency + self.settings.llm_max_pending_requests

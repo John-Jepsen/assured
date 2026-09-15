@@ -41,6 +41,22 @@ def test_readiness_returns_503_when_session_store_is_unavailable(api_client, mon
     assert response.json() == {"ready": False}
 
 
+def test_readiness_returns_503_when_model_provider_is_unavailable(api_client, monkeypatch):
+    from insurance_ai.api import routes_health
+
+    class UnavailableLLM:
+        async def ready(self):
+            return False
+
+    class UnavailableProviders:
+        llm = UnavailableLLM()
+
+    monkeypatch.setattr(routes_health, "get_providers", lambda: UnavailableProviders())
+    response = api_client.get("/ready")
+    assert response.status_code == 503
+    assert response.json() == {"ready": False}
+
+
 def test_chat_rejects_blank_and_oversized_messages(api_client):
     assert api_client.post("/api/chat", json={"message": "   "}).status_code == 422
     assert api_client.post("/api/chat", json={"message": "x" * 8_001}).status_code == 422

@@ -40,6 +40,9 @@ All notable changes to this project are documented here.
   pending-request limits, queue timeouts, jittered retries, and a failure-threshold
   circuit breaker with a single half-open recovery probe. Rejections feed the existing
   deterministic-answer fallback instead of accumulating unbounded inference work.
+- **Model-aware readiness.** The readiness endpoint now verifies that the configured
+  model is advertised by the OpenAI-compatible inference service and returns HTTP 503
+  while that service is unavailable, malformed, or protected by an open circuit.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

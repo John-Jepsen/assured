@@ -68,6 +68,10 @@ class LLMProvider(ABC):
         """Release provider resources when the application shuts down."""
         return None
 
+    async def ready(self) -> bool:
+        """Return whether this provider can accept generation work."""
+        return True
+
 
 class SpeechToTextProvider(ABC):
     name: str = "base"
