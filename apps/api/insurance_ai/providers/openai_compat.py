@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+import time
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -18,6 +21,14 @@ from insurance_ai.config import Settings
 from insurance_ai.providers.base import ChatMessage, EmbeddingProvider, LLMMetadata, LLMProvider
 
 _RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
+
+
+class ModelOverloadedError(RuntimeError):
+    """The bounded local inference queue cannot accept another request."""
+
+
+class ModelCircuitOpenError(RuntimeError):
+    """Model calls are paused after repeated endpoint failures."""
 
 
 class OpenAICompatLLM(LLMProvider):
@@ -30,7 +41,13 @@ class OpenAICompatLLM(LLMProvider):
 
     name = "openai_compat"
 
-    def __init__(self, settings: Settings, *, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        client: httpx.AsyncClient | None = None,
+        clock=time.monotonic,
+    ) -> None:
         self.settings = settings
         if settings.llm_provider == "ollama":
             self.base_url = settings.ollama_base_url.rstrip("/") + "/v1"
@@ -56,6 +73,14 @@ class OpenAICompatLLM(LLMProvider):
             endpoint=self.base_url,
         )
         self._owns_client = client is None
+        self._clock = clock
+        self._concurrency = asyncio.Semaphore(settings.llm_max_concurrency)
+        self._admission_lock = asyncio.Lock()
+        self._admitted = 0
+        self._circuit_lock = asyncio.Lock()
+        self._circuit_failures = 0
+        self._circuit_open_until = 0.0
+        self._circuit_probe_in_flight = False
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(
                 settings.llm_request_timeout_seconds,
@@ -84,7 +109,7 @@ class OpenAICompatLLM(LLMProvider):
     async def _backoff(self, attempt: int) -> None:
         delay = self.settings.llm_retry_backoff_seconds * (2**attempt)
         if delay > 0:
-            await asyncio.sleep(delay)
+            await asyncio.sleep(delay * random.uniform(0.5, 1.5))
 
     def _can_retry_status(self, response: httpx.Response, attempt: int) -> bool:
         return (
@@ -96,8 +121,66 @@ class OpenAICompatLLM(LLMProvider):
         if self._owns_client:
             await self._client.aclose()
 
-    async def complete(self, messages: list[ChatMessage], **kwargs) -> str:
-        payload = self._payload(messages, kwargs)
+    @asynccontextmanager
+    async def _admission(self):
+        limit = self.settings.llm_max_concurrency + self.settings.llm_max_pending_requests
+        async with self._admission_lock:
+            if self._admitted >= limit:
+                raise ModelOverloadedError("model request queue is full")
+            self._admitted += 1
+        acquired = False
+        try:
+            try:
+                await asyncio.wait_for(
+                    self._concurrency.acquire(),
+                    timeout=self.settings.llm_queue_timeout_seconds,
+                )
+                acquired = True
+            except TimeoutError as exc:
+                raise ModelOverloadedError("model request queue timed out") from exc
+            yield
+        finally:
+            if acquired:
+                self._concurrency.release()
+            async with self._admission_lock:
+                self._admitted -= 1
+
+    async def _before_model_request(self) -> bool:
+        """Return whether this request is the single half-open recovery probe."""
+        async with self._circuit_lock:
+            now = self._clock()
+            if self._circuit_open_until > now:
+                raise ModelCircuitOpenError("model circuit breaker is open")
+            if self._circuit_open_until:
+                if self._circuit_probe_in_flight:
+                    raise ModelCircuitOpenError("model circuit recovery probe is in flight")
+                self._circuit_probe_in_flight = True
+                return True
+            return False
+
+    async def _record_success(self) -> None:
+        async with self._circuit_lock:
+            self._circuit_failures = 0
+            self._circuit_open_until = 0.0
+            self._circuit_probe_in_flight = False
+
+    async def _record_failure(self, recovery_probe: bool) -> None:
+        async with self._circuit_lock:
+            self._circuit_failures += 1
+            if (
+                recovery_probe
+                or self._circuit_failures >= self.settings.llm_circuit_failure_threshold
+            ):
+                self._circuit_open_until = (
+                    self._clock() + self.settings.llm_circuit_recovery_seconds
+                )
+            self._circuit_probe_in_flight = False
+
+    async def _release_recovery_probe(self) -> None:
+        async with self._circuit_lock:
+            self._circuit_probe_in_flight = False
+
+    async def _complete_request(self, payload: dict[str, Any]) -> str:
         for attempt in range(self.settings.llm_max_retries + 1):
             try:
                 response = await self._client.post(
@@ -116,39 +199,72 @@ class OpenAICompatLLM(LLMProvider):
                 await self._backoff(attempt)
         raise RuntimeError("LLM request exhausted retries")  # pragma: no cover
 
+    async def complete(self, messages: list[ChatMessage], **kwargs) -> str:
+        payload = self._payload(messages, kwargs)
+        async with self._admission():
+            recovery_probe = await self._before_model_request()
+            try:
+                result = await self._complete_request(payload)
+            except asyncio.CancelledError:
+                if recovery_probe:
+                    await self._record_failure(recovery_probe=True)
+                raise
+            except Exception:
+                await self._record_failure(recovery_probe)
+                raise
+            await self._record_success()
+            return result
+
     async def stream(self, messages: list[ChatMessage], **kwargs) -> AsyncIterator[str]:
         payload = {**self._payload(messages, kwargs), "stream": True}
-        for attempt in range(self.settings.llm_max_retries + 1):
-            emitted = False
+        async with self._admission():
+            recovery_probe = await self._before_model_request()
             try:
-                async with self._client.stream(
-                    "POST",
-                    f"{self.base_url}/chat/completions",
-                    json=payload,
-                    headers=self._headers(),
-                ) as response:
-                    if self._can_retry_status(response, attempt):
-                        await self._backoff(attempt)
-                        continue
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if data == "[DONE]":
+                for attempt in range(self.settings.llm_max_retries + 1):
+                    emitted = False
+                    try:
+                        async with self._client.stream(
+                            "POST",
+                            f"{self.base_url}/chat/completions",
+                            json=payload,
+                            headers=self._headers(),
+                        ) as response:
+                            if self._can_retry_status(response, attempt):
+                                await self._backoff(attempt)
+                                continue
+                            response.raise_for_status()
+                            async for line in response.aiter_lines():
+                                if not line.startswith("data:"):
+                                    continue
+                                data = line[5:].strip()
+                                if data == "[DONE]":
+                                    await self._record_success()
+                                    return
+                                try:
+                                    delta = json.loads(data)["choices"][0]["delta"].get(
+                                        "content"
+                                    )
+                                except (KeyError, IndexError, TypeError, ValueError):
+                                    continue
+                                if delta:
+                                    emitted = True
+                                    yield delta
+                            await self._record_success()
                             return
-                        try:
-                            delta = json.loads(data)["choices"][0]["delta"].get("content")
-                        except (KeyError, IndexError, TypeError, ValueError):
-                            continue
-                        if delta:
-                            emitted = True
-                            yield delta
-                    return
-            except httpx.TransportError:
-                if emitted or attempt >= self.settings.llm_max_retries:
-                    raise
-                await self._backoff(attempt)
+                    except httpx.TransportError:
+                        if emitted or attempt >= self.settings.llm_max_retries:
+                            raise
+                        await self._backoff(attempt)
+            except asyncio.CancelledError:
+                if recovery_probe:
+                    await self._record_failure(recovery_probe=True)
+                raise
+            except Exception:
+                await self._record_failure(recovery_probe)
+                raise
+            finally:
+                if recovery_probe:
+                    await self._release_recovery_probe()
 
 
 class OpenAIEmbedding(EmbeddingProvider):

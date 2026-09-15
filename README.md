@@ -121,7 +121,7 @@ Providers are config-selected (`.env`); see [model setup](#model-providers).
 ## Verify it
 
 ```bash
-make test   # 93 tests: unit + API + WebSocket + voice + payments + evals (SQLite, mock providers)
+make test   # 96 tests: unit + API + WebSocket + voice + payments + evals (SQLite, mock providers)
 make eval   # 38 eval cases through the real orchestrator; report persisted to the DB + admin UI
 ```
 

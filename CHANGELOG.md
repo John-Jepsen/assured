@@ -36,6 +36,10 @@ All notable changes to this project are documented here.
   through cached JWKS, required issuer/audience/time claims, customer-ID and role
   mapping, separate customer/admin dependencies, WebSocket authentication, persisted
   owner subjects, and fail-closed cross-subject access checks.
+- **Bounded model overload behavior.** Remote LLM calls now use explicit active and
+  pending-request limits, queue timeouts, jittered retries, and a failure-threshold
+  circuit breaker with a single half-open recovery probe. Rejections feed the existing
+  deterministic-answer fallback instead of accumulating unbounded inference work.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

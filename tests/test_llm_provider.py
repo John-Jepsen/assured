@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -9,7 +10,11 @@ import pytest
 from insurance_ai.config import Settings
 from insurance_ai.providers.base import ChatMessage
 from insurance_ai.providers.factory import build_llm
-from insurance_ai.providers.openai_compat import OpenAICompatLLM
+from insurance_ai.providers.openai_compat import (
+    ModelCircuitOpenError,
+    ModelOverloadedError,
+    OpenAICompatLLM,
+)
 from pydantic import ValidationError
 
 
@@ -113,3 +118,89 @@ async def test_factory_selects_remote_provider_without_transformers_dependency()
 def test_llm_transport_limits_are_validated():
     with pytest.raises(ValidationError, match="llm_max_keepalive_connections"):
         _settings(llm_max_connections=1, llm_max_keepalive_connections=2)
+
+
+@pytest.mark.asyncio
+async def test_provider_rejects_requests_beyond_bounded_active_and_pending_capacity():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        started.set()
+        await release.wait()
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ready"}}]})
+
+    settings = _settings(llm_max_concurrency=1, llm_max_pending_requests=0)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatLLM(settings, client=client)
+        first = asyncio.create_task(
+            provider.complete([ChatMessage(role="user", content="first")])
+        )
+        await started.wait()
+        with pytest.raises(ModelOverloadedError, match="queue is full"):
+            await provider.complete([ChatMessage(role="user", content="second")])
+        release.set()
+        assert await first == "ready"
+
+
+@pytest.mark.asyncio
+async def test_provider_times_out_while_waiting_for_inference_capacity():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        started.set()
+        await release.wait()
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ready"}}]})
+
+    settings = _settings(
+        llm_max_concurrency=1,
+        llm_max_pending_requests=1,
+        llm_queue_timeout_seconds=0.01,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatLLM(settings, client=client)
+        first = asyncio.create_task(
+            provider.complete([ChatMessage(role="user", content="first")])
+        )
+        await started.wait()
+        with pytest.raises(ModelOverloadedError, match="queue timed out"):
+            await provider.complete([ChatMessage(role="user", content="queued")])
+        release.set()
+        assert await first == "ready"
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_opens_then_allows_one_successful_recovery_probe():
+    attempts = 0
+    endpoint_healthy = {"value": False}
+    now = {"value": 100.0}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if not endpoint_healthy["value"]:
+            return httpx.Response(503, json={"error": "unavailable"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "recovered"}}]})
+
+    settings = _settings(
+        llm_circuit_failure_threshold=2,
+        llm_circuit_recovery_seconds=30,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatLLM(settings, client=client, clock=lambda: now["value"])
+        for _ in range(2):
+            with pytest.raises(httpx.HTTPStatusError):
+                await provider.complete([ChatMessage(role="user", content="hello")])
+
+        with pytest.raises(ModelCircuitOpenError):
+            await provider.complete([ChatMessage(role="user", content="blocked")])
+        assert attempts == 2
+
+        now["value"] = 131.0
+        endpoint_healthy["value"] = True
+        assert (
+            await provider.complete([ChatMessage(role="user", content="probe")])
+            == "recovered"
+        )
+        assert attempts == 3

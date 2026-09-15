@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     llm_max_connections: int = Field(default=100, gt=0)
     llm_max_keepalive_connections: int = Field(default=20, ge=0)
     llm_max_tokens: int = Field(default=400, gt=0)
+    llm_max_concurrency: int = Field(default=8, gt=0)
+    llm_max_pending_requests: int = Field(default=16, ge=0)
+    llm_queue_timeout_seconds: float = Field(default=2.0, gt=0)
+    llm_circuit_failure_threshold: int = Field(default=5, gt=0)
+    llm_circuit_recovery_seconds: float = Field(default=30.0, gt=0)
 
     # --- payments ----------------------------------------------------------
     stripe_secret_key: str | None = None

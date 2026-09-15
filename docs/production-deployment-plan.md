@@ -50,7 +50,7 @@ organizational approval.
 
 As of the review date:
 
-- 93 backend tests pass, the opt-in pgvector and Redis integration tests pass against
+- 96 backend tests pass, the opt-in pgvector and Redis integration tests pass against
   their real services, and Ruff reports no findings.
 - Docker Compose validates, and the API and web images build.
 - The frontend TypeScript/Vite production build succeeds.
@@ -70,7 +70,7 @@ The highest-risk implementation gaps are:
 | Conversation ownership | New conversations persist the stable OIDC subject and every customer channel rejects a different subject; authenticated access to legacy unowned rows fails closed | Migration/retention handling for legacy rows and reconnect/load testing remain open |
 | Session storage | Verification and pending actions use TTL-bound Redis records with per-conversation distributed mutation locks; memory remains a development backend | Authenticated logout/revocation and a full multi-replica transaction soak test remain open |
 | Demo identity | A fixed OTP and synthetic customer directory remain available in development, while production configuration rejects the OTP and disables the directory | Production identity still requires the planned OIDC/MFA integration |
-| LLM runtime | A remote-provider and vLLM foundation exists but is not capacity-tested | Safe concurrency, model quality, and GPU sizing are not yet established |
+| LLM runtime | The remote provider has bounded active/pending concurrency, queue timeout, jittered retry, and circuit-breaker fallback, but the pinned vLLM path is not capacity-tested | Approved limits, model quality, and GPU sizing are not yet established on target hardware |
 | Grounding validation | A conservative validator now protects amounts, identifiers, citations, URLs, critical insurance concepts, and polarity before output is released | Real-model adversarial evaluation and broader semantic-entailment coverage are still required |
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
 | Startup | Compose separates migrations, synthetic seeding, ingestion, and API serving into dependency-gated jobs | The selected production orchestrator still needs equivalent release jobs, concurrency protection, and content-versioned ingestion |

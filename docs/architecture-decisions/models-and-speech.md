@@ -20,7 +20,10 @@ considered, and the conditions under which we would revisit them.
   `MockLLM` composer for deterministic tests and demos. Real models run behind a
   dedicated OpenAI-compatible endpoint: **Ollama** for the CPU-friendly local profile,
   or a pinned **vLLM/Hugging Face** deployment for the GPU production path. Model
-  weights are never loaded into the FastAPI process.
+  weights are never loaded into the FastAPI process. The API adapter bounds active and
+  pending calls, times out queue admission, applies jittered transient retries, and opens
+  a circuit breaker after repeated endpoint failures; the deterministic grounded draft
+  remains available while inference is overloaded or unavailable.
 - **Optional:** any **OpenAI-compatible** endpoint, selected purely by config.
 
 The LLM never selects tools or authorizes actions. Tool selection is a deterministic,
