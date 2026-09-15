@@ -6,16 +6,19 @@ import hashlib
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from insurance_ai.config import Settings
 from insurance_ai.security import rate_limit
 from insurance_ai.security.identity import Principal
 from insurance_ai.security.rate_limit import (
     MemoryRateLimiter,
     RateLimitDecision,
+    RateLimitExceeded,
     RedisRateLimiter,
     check_limit,
     client_ip,
+    rate_limit_exception_handler,
     rate_limited_admin_principal,
     rate_limited_customer_principal,
     websocket_action_allowed,
@@ -23,6 +26,7 @@ from insurance_ai.security.rate_limit import (
     websocket_principal_connection_allowed,
 )
 from pydantic import ValidationError
+from starlette.datastructures import Headers
 from starlette.websockets import WebSocketDisconnect
 from test_production_config import _production_settings
 
@@ -78,9 +82,19 @@ class _FakeRedis:
         self.closed = True
 
 
-def _connection(host: str | None = "203.0.113.9"):
+def _connection(host: str | None = "203.0.113.9", **headers: str):
     """An object shaped like the Request/WebSocket attributes ``client_ip`` reads."""
-    return SimpleNamespace(client=SimpleNamespace(host=host) if host else None)
+    return SimpleNamespace(
+        client=SimpleNamespace(host=host) if host else None,
+        headers=Headers({name.replace("_", "-"): value for name, value in headers.items()}),
+    )
+
+
+def _trusting(*proxies: str, **overrides) -> Settings:
+    return Settings(_env_file=None, rate_limit_trusted_proxies=list(proxies), **overrides)
+
+
+PROXY = "203.0.113.9"  # the peer address every _connection() reports by default
 
 
 @pytest.fixture
@@ -118,6 +132,94 @@ def test_counter_keys_namespace_and_hash_the_identifier():
 def test_client_ip_uses_the_asgi_peer_and_degrades_to_unknown():
     assert client_ip(_connection("198.51.100.4")) == "198.51.100.4"
     assert client_ip(_connection(None)) == "unknown"
+
+
+def test_forwarded_headers_from_an_untrusted_peer_are_ignored():
+    """The default configuration trusts nobody, so a caller cannot rename itself."""
+    spoofed = _connection(
+        PROXY,
+        x_forwarded_for="198.51.100.4",
+        x_real_ip="198.51.100.4",
+    )
+
+    assert client_ip(spoofed, Settings(_env_file=None)) == PROXY
+    # Naming a *different* proxy as trusted does not help the peer either.
+    assert client_ip(spoofed, _trusting("192.0.2.1")) == PROXY
+
+
+def test_client_ip_reads_the_forwarded_chain_from_a_trusted_proxy():
+    settings = _trusting(PROXY)
+
+    forwarded = _connection(PROXY, x_forwarded_for="198.51.100.4")
+    assert client_ip(forwarded, settings) == "198.51.100.4"
+    # A CIDR entry covers the whole proxy tier, and IPv6 survives canonicalization.
+    assert client_ip(forwarded, _trusting("203.0.113.0/24")) == "198.51.100.4"
+    assert (
+        client_ip(_connection(PROXY, x_forwarded_for="[2001:DB8::1]:443"), settings)
+        == "2001:db8::1"
+    )
+
+
+def test_client_ip_falls_back_to_x_real_ip_and_then_to_the_peer():
+    settings = _trusting(PROXY)
+
+    assert client_ip(_connection(PROXY, x_real_ip="198.51.100.4"), settings) == "198.51.100.4"
+    # Nothing forwarded, or an unusable chain: the proxy address is all there is.
+    assert client_ip(_connection(PROXY), settings) == PROXY
+    assert client_ip(_connection(PROXY, x_forwarded_for="not-an-ip"), settings) == PROXY
+
+
+def test_forged_forwarded_entries_cannot_displace_the_address_the_proxy_appended():
+    """nginx appends the real peer, so the chain is only believed from the right."""
+    settings = _trusting(PROXY)
+
+    forged = _connection(PROXY, x_forwarded_for="10.0.0.1, 198.51.100.4")
+    assert client_ip(forged, settings) == "198.51.100.4"
+    # Multi-hop: trusted hops are skipped, the first untrusted address is the caller.
+    chained = _connection(PROXY, x_forwarded_for="198.51.100.4, 203.0.113.8")
+    assert client_ip(chained, _trusting("203.0.113.0/24")) == "198.51.100.4"
+
+
+@pytest.mark.asyncio
+async def test_spoofed_forwarded_headers_stay_inside_the_peer_bucket(limited):
+    """Rotating X-Forwarded-For from an untrusted peer buys no extra budget."""
+    limited(rate_limit_http_ip_requests=1)
+
+    first = _connection(PROXY, x_forwarded_for="198.51.100.1")
+    second = _connection(PROXY, x_forwarded_for="198.51.100.2")
+
+    assert (await rate_limit.http_ip_limit(first)).allowed
+    assert not (await rate_limit.http_ip_limit(second)).allowed
+
+
+@pytest.mark.asyncio
+async def test_a_trusted_proxy_restores_per_visitor_budgets(limited):
+    """The compose path: every browser behind nginx gets its own counter again."""
+    limited(rate_limit_http_ip_requests=1, rate_limit_trusted_proxies=[PROXY])
+
+    async def hit(forwarded: str) -> bool:
+        connection = _connection(PROXY, x_forwarded_for=forwarded)
+        return (await rate_limit.http_ip_limit(connection)).allowed
+
+    assert await hit("198.51.100.1")
+    assert await hit("198.51.100.2")
+    # A forged prefix does not open a second bucket for the same visitor.
+    assert not await hit("10.0.0.1, 198.51.100.1")
+
+
+def test_trusted_proxy_configuration_rejects_values_that_are_not_addresses():
+    with pytest.raises(ValidationError, match="IP addresses or CIDR networks"):
+        _trusting("nginx.internal")
+
+    # Accepted entries are normalized to networks so comparisons are unambiguous.
+    assert _trusting("203.0.113.9", "10.0.0.0/8").rate_limit_trusted_proxies == [
+        "203.0.113.9/32",
+        "10.0.0.0/8",
+    ]
+
+
+def test_trusted_proxies_are_empty_by_default():
+    assert Settings(_env_file=None).rate_limit_trusted_proxies == []
 
 
 # --- in-memory fixed window --------------------------------------------------
@@ -302,12 +404,28 @@ async def test_principal_dependencies_raise_429_with_retry_after(limited, depend
 
     assert await dependency(principal) is principal
     assert await dependency(principal) is principal
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(RateLimitExceeded) as exc_info:
         await dependency(principal)
 
     assert exc_info.value.status_code == 429
-    assert exc_info.value.detail == "Too many requests"
+    assert exc_info.value.detail == "Too many requests."
     assert int(exc_info.value.headers["Retry-After"]) >= 1
+
+
+def test_rate_limited_principals_render_the_same_body_as_the_http_middleware():
+    """One client-side check covers both limits, so the two 429s cannot diverge."""
+    app = FastAPI()
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exception_handler)
+
+    @app.get("/limited")
+    async def _limited() -> None:
+        raise RateLimitExceeded(RateLimitDecision(allowed=False, retry_after=7, remaining=0))
+
+    response = TestClient(app).get("/limited")
+
+    assert response.status_code == 429
+    assert response.json() == {"error": "rate_limited", "message": "Too many requests."}
+    assert response.headers["Retry-After"] == "7"
 
 
 @pytest.mark.asyncio
@@ -317,7 +435,7 @@ async def test_principal_budgets_are_isolated_per_subject(limited):
     second = Principal("subject-b", "customer-2", frozenset({"customer"}))
 
     await rate_limited_customer_principal(first)
-    with pytest.raises(HTTPException):
+    with pytest.raises(RateLimitExceeded):
         await rate_limited_customer_principal(first)
     # A different subject still has its own budget.
     assert await rate_limited_customer_principal(second) is second
@@ -433,8 +551,9 @@ def test_admin_routes_enforce_the_per_principal_http_budget(api_client, limited)
 
     blocked = api_client.get("/api/admin/demo-customers")
     assert blocked.status_code == 429
-    assert blocked.json() == {"detail": "Too many requests"}
     assert int(blocked.headers["Retry-After"]) >= 1
+    # Body shape is asserted against the registered handler in
+    # test_rate_limited_principals_render_the_same_body_as_the_http_middleware.
 
 
 # --- websocket routes end to end ---------------------------------------------

@@ -8,6 +8,7 @@ first use. Nothing secret is ever defaulted to a real value.
 from __future__ import annotations
 
 from functools import lru_cache
+from ipaddress import ip_network
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -143,6 +144,28 @@ class Settings(BaseSettings):
     rate_limit_websocket_ip_actions: int = Field(default=120, gt=0)
     rate_limit_websocket_principal_actions: int = Field(default=30, gt=0)
     rate_limit_memory_max_buckets: int = Field(default=10_000, gt=0)
+    # Reverse proxies whose forwarded client address may be believed, as IP addresses
+    # or CIDR networks. EMPTY BY DEFAULT: with no entry the API only ever uses the
+    # ASGI peer address, so a client can never nominate its own rate-limit bucket.
+    # Add the exact address of the proxy that terminates client connections (the
+    # compose stack sets the nginx container address); trusting a range wider than
+    # the proxy itself hands bucket selection to anything that can reach the API
+    # from inside that range.
+    rate_limit_trusted_proxies: list[str] = Field(default_factory=list)
+
+    @field_validator("rate_limit_trusted_proxies")
+    @classmethod
+    def _validate_trusted_proxies(cls, proxies: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for entry in proxies:
+            try:
+                network = ip_network(entry.strip(), strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    "rate_limit_trusted_proxies must contain IP addresses or CIDR networks"
+                ) from exc
+            normalized.append(str(network))
+        return normalized
 
     @field_validator("allowed_origins")
     @classmethod

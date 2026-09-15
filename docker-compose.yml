@@ -16,6 +16,11 @@ x-api-runtime: &api-runtime
     INSURANCE_AI_DATABASE_URL: postgresql+asyncpg://insurance:insurance@postgres:5432/insurance_ai
     INSURANCE_AI_SESSION_BACKEND: redis
     INSURANCE_AI_REDIS_URL: redis://:${REDIS_PASSWORD:-insurance-demo}@redis:6379/0
+    # Browser traffic arrives through the nginx container, so without this every
+    # request would share one per-IP bucket. Exactly the web container address is
+    # trusted: the bridge gateway (host traffic to the published API port) is not,
+    # so a direct caller still cannot nominate its own bucket with X-Forwarded-For.
+    INSURANCE_AI_RATE_LIMIT_TRUSTED_PROXIES: '["${WEB_PROXY_IP:-172.29.0.10}"]'
   volumes:
     - modelcache:/models
   init: true
@@ -127,6 +132,18 @@ services:
     stop_grace_period: 15s
     ports:
       - "${WEB_PORT:-8080}:8080"
+    networks:
+      default:
+        # Pinned so the API can trust this one address as its reverse proxy.
+        ipv4_address: ${WEB_PROXY_IP:-172.29.0.10}
+
+networks:
+  default:
+    ipam:
+      config:
+        # Fixed so the proxy address above is stable. Override both this and
+        # WEB_PROXY_IP if the range collides with an existing network.
+        - subnet: ${COMPOSE_SUBNET:-172.29.0.0/24}
 
 volumes:
   pgdata:

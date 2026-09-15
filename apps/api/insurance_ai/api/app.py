@@ -14,7 +14,12 @@ from insurance_ai.observability import configure_logging, get_logger, setup_trac
 from insurance_ai.observability.middleware import ObservabilityMiddleware
 from insurance_ai.providers.factory import get_providers
 from insurance_ai.security.identity import get_authenticator
-from insurance_ai.security.rate_limit import get_rate_limiter, http_ip_limit
+from insurance_ai.security.rate_limit import (
+    RateLimitExceeded,
+    get_rate_limiter,
+    http_ip_limit,
+    rate_limit_exception_handler,
+)
 from insurance_ai.security.session import get_session_store
 from insurance_ai.tools.registry import load_all_tools
 
@@ -115,6 +120,10 @@ def create_app() -> FastAPI:
     app.include_router(routes_telephony.router)
 
     setup_tracing(app)  # no-op unless INSURANCE_AI_OTEL_ENABLED=true + `otel` extra
+
+    # Without this the per-principal gate would render FastAPI's default
+    # {"detail": ...} body, which differs from the middleware's rejection.
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exception_handler)
 
     @app.exception_handler(Exception)
     async def _unhandled(_request, exc):  # never leak a stack trace
