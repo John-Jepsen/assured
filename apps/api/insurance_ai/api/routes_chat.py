@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,7 @@ from insurance_ai.api.schemas import ChatRequest, ChatResponse, ChatSocketReques
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory, get_session
 from insurance_ai.observability import get_logger
+from insurance_ai.security.identity import Principal, customer_principal, websocket_principal
 from insurance_ai.security.origin import websocket_origin_allowed
 from insurance_ai.security.session import get_session_store
 from insurance_ai.security.verification import VerificationClaim, verify_identity
@@ -22,9 +23,18 @@ _service = ConversationService()
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, db: AsyncSession = Depends(get_session)) -> ChatResponse:
+async def chat(
+    req: ChatRequest,
+    db: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(customer_principal),
+) -> ChatResponse:
     result, _sess, conv = await _service.handle_message(
-        db, req.conversation_id, req.message, channel=req.channel, request_id=str(uuid.uuid4())
+        db,
+        req.conversation_id,
+        req.message,
+        principal=principal,
+        channel=req.channel,
+        request_id=str(uuid.uuid4()),
     )
     return ChatResponse(
         conversation_id=conv.id,
@@ -35,10 +45,19 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_session)) -> Cha
 
 
 @router.post("/verify")
-async def verify(req: VerifyRequest, db: AsyncSession = Depends(get_session)) -> dict:
+async def verify(
+    req: VerifyRequest,
+    db: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(customer_principal),
+) -> dict:
     """Deterministic verification endpoint (never routed through the LLM)."""
+    conv = await _service.require_conversation(db, req.conversation_id, principal)
     store = get_session_store()
     async with store.locked(req.conversation_id) as sess:
+        if principal.customer_id:
+            if sess.customer_id and sess.customer_id != principal.customer_id:
+                raise HTTPException(status_code=403, detail="Customer access denied")
+            sess.customer_id = principal.customer_id
         result = await verify_identity(
             db,
             sess,
@@ -50,13 +69,9 @@ async def verify(req: VerifyRequest, db: AsyncSession = Depends(get_session)) ->
                 otp_code=req.otp_code,
             ),
         )
-        from insurance_ai.db.models import Conversation
-
-        conv = await db.get(Conversation, req.conversation_id)
-        if conv:
-            conv.verification_status = sess.verification_status
-            conv.customer_id = sess.customer_id or conv.customer_id
-            await db.commit()
+        conv.verification_status = sess.verification_status
+        conv.customer_id = sess.customer_id or conv.customer_id
+        await db.commit()
     return {
         "status": result.status,
         "verified": sess.is_verified,
@@ -72,10 +87,18 @@ async def ws_chat(ws: WebSocket) -> None:
     if not websocket_origin_allowed(ws.headers.get("origin")):
         await ws.close(code=1008, reason="Origin not allowed")
         return
+    try:
+        principal = await websocket_principal(ws)
+    except HTTPException:
+        await ws.close(code=1008, reason="Authentication required")
+        return
     await ws.accept()
     try:
         while True:
             payload = await ws.receive_json()
+            if principal.is_expired():
+                await ws.close(code=1008, reason="Access token expired")
+                break
             try:
                 request = ChatSocketRequest.model_validate(payload)
             except ValidationError:
@@ -91,7 +114,11 @@ async def ws_chat(ws: WebSocket) -> None:
             conversation_id = request.conversation_id
             async with SessionFactory() as db:
                 turn = await _service.prepare_message(
-                    db, conversation_id, message, request_id=str(uuid.uuid4())
+                    db,
+                    conversation_id,
+                    message,
+                    principal=principal,
+                    request_id=str(uuid.uuid4()),
                 )
                 result = turn.result
                 conv = turn.conversation

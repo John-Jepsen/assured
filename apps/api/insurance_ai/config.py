@@ -23,6 +23,7 @@ VectorBackend = Literal["numpy", "pgvector"]
 PaymentProviderName = Literal["mock", "stripe"]
 TelephonyProviderName = Literal["none", "twilio"]
 SessionBackend = Literal["memory", "redis"]
+AuthenticationMode = Literal["none", "oidc"]
 
 
 class Settings(BaseSettings):
@@ -45,6 +46,16 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:5173", "http://localhost:8080"]
     )
     demo_features_enabled: bool = True
+    authentication_mode: AuthenticationMode = "none"
+    oidc_issuer: str | None = None
+    oidc_audience: str | None = None
+    oidc_jwks_url: str | None = None
+    oidc_algorithm: Literal["RS256", "ES256"] = "RS256"
+    oidc_leeway_seconds: int = Field(default=30, ge=0, le=300)
+    oidc_customer_id_claim: str = "customer_id"
+    oidc_roles_claim: str = "roles"
+    oidc_admin_roles: list[str] = Field(default_factory=lambda: ["assured-admin"])
+    oidc_access_token_cookie: str = "assured_access_token"
     # Optional OpenTelemetry tracing. When enabled, the API is auto-instrumented and
     # spans export via OTLP to the standard OTEL_EXPORTER_OTLP_ENDPOINT (or the default
     # http://localhost:4318). Off by default; requires the `otel` extra.
@@ -151,6 +162,12 @@ class Settings(BaseSettings):
             raise ValueError("llm_max_keepalive_connections cannot exceed llm_max_connections")
         if self.session_backend == "redis" and not self.redis_url:
             raise ValueError("session_backend=redis requires INSURANCE_AI_REDIS_URL")
+        if self.authentication_mode == "oidc" and not (
+            self.oidc_issuer and self.oidc_audience and self.oidc_jwks_url
+        ):
+            raise ValueError(
+                "authentication_mode=oidc requires issuer, audience, and JWKS URL"
+            )
         if self.llm_provider == "huggingface" and self.environment == "prod":
             if not self.huggingface_token:
                 raise ValueError("production Hugging Face serving requires a model-service token")
@@ -185,6 +202,15 @@ class Settings(BaseSettings):
                 )
             if self.session_backend != "redis":
                 unsafe.append("the process-local session backend is selected")
+            if self.authentication_mode != "oidc":
+                unsafe.append("OIDC authentication is not enabled")
+            elif any(
+                urlsplit(url).scheme != "https"
+                for url in (self.oidc_issuer or "", self.oidc_jwks_url or "")
+            ):
+                unsafe.append("OIDC issuer and JWKS URL must use HTTPS")
+            if not self.oidc_admin_roles:
+                unsafe.append("no administrative OIDC roles are configured")
 
             redis = urlsplit(self.redis_url or "")
             if self.session_backend == "redis" and redis.scheme not in {"redis", "rediss"}:

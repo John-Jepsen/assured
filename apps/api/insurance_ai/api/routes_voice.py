@@ -24,13 +24,14 @@ import binascii
 import time
 import uuid
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from insurance_ai.api.schemas import MAX_CHAT_MESSAGE_CHARS, MAX_CONVERSATION_ID_CHARS
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory
 from insurance_ai.observability import get_logger
 from insurance_ai.providers.factory import get_providers
+from insurance_ai.security.identity import Principal, websocket_principal
 from insurance_ai.security.origin import websocket_origin_allowed
 
 router = APIRouter(tags=["voice"])
@@ -44,6 +45,7 @@ async def _run_response(
     conversation_id: str | None,
     audio: bytes,
     t_end: float,
+    principal: Principal,
     pretranscribed: str | None = None,
 ):
     providers = get_providers()
@@ -65,7 +67,12 @@ async def _run_response(
     # Orchestrate, stream, then persist exactly what the caller received.
     async with SessionFactory() as db:
         turn = await _service.prepare_message(
-            db, conversation_id, transcript, channel="web", request_id=str(uuid.uuid4())
+            db,
+            conversation_id,
+            transcript,
+            principal=principal,
+            channel="web",
+            request_id=str(uuid.uuid4()),
         )
         result = turn.result
         conv = turn.conversation
@@ -126,6 +133,11 @@ async def ws_voice(ws: WebSocket) -> None:
     if not websocket_origin_allowed(ws.headers.get("origin")):
         await ws.close(code=1008, reason="Origin not allowed")
         return
+    try:
+        principal = await websocket_principal(ws)
+    except HTTPException:
+        await ws.close(code=1008, reason="Authentication required")
+        return
     await ws.accept()
     buffer = bytearray()
     task: asyncio.Task | None = None
@@ -133,6 +145,9 @@ async def ws_voice(ws: WebSocket) -> None:
     try:
         while True:
             msg = await ws.receive_json()
+            if principal.is_expired():
+                await ws.close(code=1008, reason="Access token expired")
+                break
             mtype = msg.get("type")
             if mtype == "audio":
                 try:
@@ -191,7 +206,14 @@ async def ws_voice(ws: WebSocket) -> None:
                 # Run the response as a background task so the receive loop stays free
                 # to process a barge-in (interruption) while the assistant is speaking.
                 task = asyncio.create_task(
-                    _run_response(ws, conversation_id, audio, t_end, pretranscribed)
+                    _run_response(
+                        ws,
+                        conversation_id,
+                        audio,
+                        t_end,
+                        principal,
+                        pretranscribed,
+                    )
                 )
 
                 def _log_done(t: asyncio.Task) -> None:

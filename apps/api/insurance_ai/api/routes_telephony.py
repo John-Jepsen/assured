@@ -14,6 +14,7 @@ from insurance_ai.config import get_settings
 from insurance_ai.db.base import SessionFactory
 from insurance_ai.observability import get_logger
 from insurance_ai.providers.factory import get_providers
+from insurance_ai.security.identity import demo_principal
 from insurance_ai.telephony import telephony_status, twiml_media_stream
 
 router = APIRouter(prefix="/api/telephony", tags=["telephony"])
@@ -52,6 +53,9 @@ async def media_stream(ws: WebSocket) -> None:
     utterance end is detected by a short silence gap. This is the same pipeline the
     browser voice path uses, proving telephony reuses the core agent system.
     """
+    if not get_settings().is_telephony_enabled:
+        await ws.close(code=1008, reason="Telephony is not configured")
+        return
     await ws.accept()
     providers = get_providers()
     buffer = bytearray()
@@ -76,6 +80,7 @@ async def media_stream(ws: WebSocket) -> None:
                             db,
                             conversation_id,
                             stt.text,
+                            principal=demo_principal(),
                             channel="phone",
                             request_id=str(uuid.uuid4()),
                         )

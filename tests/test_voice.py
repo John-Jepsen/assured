@@ -23,9 +23,17 @@ class _FakeWS:
 @pytest.mark.asyncio
 async def test_voice_produces_transcript_audio_and_metrics(global_db_seeded):
     from insurance_ai.api.routes_voice import _run_response
+    from insurance_ai.security.identity import demo_principal
 
     ws = _FakeWS()
-    await _run_response(ws, None, b"", 0.0, pretranscribed="Does auto insurance cover a rental car?")
+    await _run_response(
+        ws,
+        None,
+        b"",
+        0.0,
+        demo_principal(),
+        pretranscribed="Does auto insurance cover a rental car?",
+    )
     types = [m["type"] for m in ws.sent]
     assert "transcript" in types
     assert "audio" in types
@@ -34,18 +42,27 @@ async def test_voice_produces_transcript_audio_and_metrics(global_db_seeded):
     # audio frames carry real WAV bytes
     import base64
 
-    audio = [m for m in ws.sent if m["type"] == "audio"][0]
+    audio = next(m for m in ws.sent if m["type"] == "audio")
     assert base64.b64decode(audio["data"])[:4] == b"RIFF"
 
 
 @pytest.mark.asyncio
 async def test_barge_in_cancels_in_flight_response(global_db_seeded):
     from insurance_ai.api.routes_voice import _run_response
+    from insurance_ai.security.identity import demo_principal
 
     ws = _FakeWS()
     task = asyncio.create_task(
-        _run_response(ws, None, b"", 0.0,
-                      pretranscribed="Tell me everything about my claim and my billing and my policy.")
+        _run_response(
+            ws,
+            None,
+            b"",
+            0.0,
+            demo_principal(),
+            pretranscribed=(
+                "Tell me everything about my claim and my billing and my policy."
+            ),
+        )
     )
     await asyncio.sleep(0.008)  # let it start streaming
     task.cancel()  # user barged in

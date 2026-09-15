@@ -12,7 +12,8 @@ containerized production service with a Hugging Face-hosted model.
 Assured has a good demonstration baseline: the API and web app build as containers,
 the test suite covers deterministic agent behavior, and providers are isolated behind
 interfaces. It is not ready to process real customer data. The release blockers are
-application authentication, session revocation/logout semantics, demo-only identity controls,
+identity-provider/frontend integration, session revocation/logout semantics, administrator
+audit controls,
 production-scale model and retrieval validation, reproducible image supply-chain
 controls, and operational controls. Remote model serving, native pgvector retrieval,
 bounded channel inputs, consistent answer persistence, and hardened application images
@@ -49,7 +50,7 @@ organizational approval.
 
 As of the review date:
 
-- 83 backend tests pass, the opt-in pgvector and Redis integration tests pass against
+- 93 backend tests pass, the opt-in pgvector and Redis integration tests pass against
   their real services, and Ruff reports no findings.
 - Docker Compose validates, and the API and web images build.
 - The frontend TypeScript/Vite production build succeeds.
@@ -65,8 +66,8 @@ The highest-risk implementation gaps are:
 
 | Area | Current behavior | Production consequence |
 |---|---|---|
-| Authentication | Customer and admin routes have no application identity | Conversation and operational data can be accessed without a trusted principal |
-| Conversation ownership | A caller can submit an arbitrary existing conversation ID | A leaked or discovered ID can be used to attach to another conversation |
+| Authentication | The API validates fixed-algorithm OIDC JWTs through JWKS and separates customer/admin dependencies | The selected IdP, browser login flow, token/cookie exchange, role mapping, revocation policy, and end-to-end staging tests remain open |
+| Conversation ownership | New conversations persist the stable OIDC subject and every customer channel rejects a different subject; authenticated access to legacy unowned rows fails closed | Migration/retention handling for legacy rows and reconnect/load testing remain open |
 | Session storage | Verification and pending actions use TTL-bound Redis records with per-conversation distributed mutation locks; memory remains a development backend | Authenticated logout/revocation and a full multi-replica transaction soak test remain open |
 | Demo identity | A fixed OTP and synthetic customer directory remain available in development, while production configuration rejects the OTP and disables the directory | Production identity still requires the planned OIDC/MFA integration |
 | LLM runtime | A remote-provider and vLLM foundation exists but is not capacity-tested | Safe concurrency, model quality, and GPU sizing are not yet established |

@@ -111,7 +111,7 @@ jobs:
             --tmpfs /tmp:rw,noexec,nosuid,size=64m \
             --cap-drop ALL --security-opt no-new-privileges:true \
             --entrypoint python assured-api:ci -c \
-            "import importlib.util, os; import alembic, insurance_ai, redis, scripts.bootstrap; assert os.getuid() != 0; assert importlib.util.find_spec('pytest') is None; assert importlib.util.find_spec('ruff') is None"
+            "import importlib.util, os; import alembic, insurance_ai, jwt, redis, scripts.bootstrap; assert os.getuid() != 0; assert importlib.util.find_spec('pytest') is None; assert importlib.util.find_spec('ruff') is None"
       - name: Build web image
         run: docker build --file docker/web.Dockerfile --tag assured-web:ci .
       - name: Check web runtime

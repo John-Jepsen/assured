@@ -32,6 +32,10 @@ All notable changes to this project are documented here.
   per-conversation distributed locks around verification and state-changing tools,
   lifecycle cleanup, readiness checks, a hardened Redis Compose service, and real-Redis
   continuity/concurrency coverage.
+- **OIDC identity and conversation ownership.** Added fixed-algorithm JWT verification
+  through cached JWKS, required issuer/audience/time claims, customer-ID and role
+  mapping, separate customer/admin dependencies, WebSocket authentication, persisted
+  owner subjects, and fail-closed cross-subject access checks.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

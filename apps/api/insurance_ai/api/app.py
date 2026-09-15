@@ -12,6 +12,7 @@ from insurance_ai import __version__
 from insurance_ai.config import get_settings
 from insurance_ai.observability import configure_logging, get_logger, setup_tracing
 from insurance_ai.providers.factory import get_providers
+from insurance_ai.security.identity import get_authenticator
 from insurance_ai.security.session import get_session_store
 from insurance_ai.tools.registry import load_all_tools
 
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI):
         if get_session_store.cache_info().currsize:
             await get_session_store().aclose()
             get_session_store.cache_clear()
+        get_authenticator.cache_clear()
 
 
 def create_app() -> FastAPI:

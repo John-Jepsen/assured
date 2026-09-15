@@ -159,6 +159,7 @@ async def test_non_streaming_turn_persists_model_rendered_answer(db):
     from insurance_ai.config import Settings
     from insurance_ai.providers.base import ChatMessage, LLMMetadata, LLMProvider
     from insurance_ai.providers.factory import Providers
+    from insurance_ai.security.identity import demo_principal
 
     class RewritingLLM(LLMProvider):
         name = "test-rewriter"
@@ -187,7 +188,10 @@ async def test_non_streaming_turn_persists_model_rendered_answer(db):
     service = ConversationService(Orchestrator(providers=providers))
 
     result, _session, conversation = await service.handle_message(
-        db, None, "Does auto insurance cover a rental car?"
+        db,
+        None,
+        "Does auto insurance cover a rental car?",
+        principal=demo_principal(),
     )
     transcript = await service.transcript(db, conversation.id)
 

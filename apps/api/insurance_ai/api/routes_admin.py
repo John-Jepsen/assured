@@ -18,8 +18,13 @@ from insurance_ai.db.models import (
     ToolExecution,
 )
 from insurance_ai.db.seed import DEMO_CUSTOMERS
+from insurance_ai.security.identity import admin_principal
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(admin_principal)],
+)
 _service = ConversationService()
 
 

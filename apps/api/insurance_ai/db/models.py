@@ -194,6 +194,9 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    # Stable OIDC subject that owns this conversation. Null exists only for legacy
+    # synthetic-demo rows and is never accepted by authenticated customer routes.
+    principal_subject: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
     channel: Mapped[str] = mapped_column(String, default="web")  # web / phone
     verification_status: Mapped[str] = mapped_column(String, default="unverified")

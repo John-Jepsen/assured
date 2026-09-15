@@ -20,6 +20,7 @@ dependencies = [
     "greenlet>=3.0",
     "numpy>=1.26",
     "pgvector>=0.3",
+    "PyJWT[crypto]>=2.10,<3",
     "redis>=5.0",
     "websockets>=12.0",
 ]

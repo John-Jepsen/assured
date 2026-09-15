@@ -39,6 +39,8 @@ async def health() -> HealthStatus:
             "stripe": settings.is_stripe_enabled,
             "telephony": settings.is_telephony_enabled,
             "payment_provider": settings.payment_provider,
+            "authentication": settings.authentication_mode,
+            "session_backend": settings.session_backend,
         },
     )
 

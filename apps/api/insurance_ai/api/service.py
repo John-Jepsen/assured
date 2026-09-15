@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,7 @@ from insurance_ai.agents.orchestrator import Orchestrator, OrchestratorResult
 from insurance_ai.db.models import Conversation, Message, ToolExecution
 from insurance_ai.domain.enums import MessageRole
 from insurance_ai.observability import get_logger
+from insurance_ai.security.identity import Principal
 from insurance_ai.security.session import Session, SessionStore, get_session_store
 
 log = get_logger("service")
@@ -53,17 +55,43 @@ class ConversationService:
         db: AsyncSession,
         conversation_id: str | None,
         *,
+        principal: Principal,
         channel: str = "web",
         customer_id: str | None = None,
     ) -> Conversation:
         if conversation_id:
             conv = await db.get(Conversation, conversation_id)
             if conv:
+                self._require_owner(conv, principal)
                 return conv
-        conv = Conversation(channel=channel, customer_id=customer_id)
+        conv = Conversation(
+            channel=channel,
+            customer_id=principal.customer_id or customer_id,
+            principal_subject=principal.subject if principal.authenticated else None,
+        )
         db.add(conv)
         await db.commit()
         await db.refresh(conv)
+        return conv
+
+    @staticmethod
+    def _require_owner(conv: Conversation, principal: Principal) -> None:
+        if principal.authenticated and conv.principal_subject != principal.subject:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Conversation access denied",
+            )
+
+    async def require_conversation(
+        self,
+        db: AsyncSession,
+        conversation_id: str,
+        principal: Principal,
+    ) -> Conversation:
+        conv = await db.get(Conversation, conversation_id)
+        if conv is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        self._require_owner(conv, principal)
         return conv
 
     async def prepare_message(
@@ -72,13 +100,25 @@ class ConversationService:
         conversation_id: str | None,
         message: str,
         *,
+        principal: Principal,
         channel: str = "web",
         request_id: str = "req",
     ) -> PreparedTurn:
-        conv = await self.get_or_create_conversation(db, conversation_id, channel=channel)
+        conv = await self.get_or_create_conversation(
+            db,
+            conversation_id,
+            channel=channel,
+            principal=principal,
+        )
         async with self.sessions.locked(conv.id) as sess:
-            if conv.customer_id and not sess.customer_id:
-                sess.customer_id = conv.customer_id
+            authorized_customer = principal.customer_id or conv.customer_id
+            if sess.customer_id and authorized_customer and sess.customer_id != authorized_customer:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Session customer access denied",
+                )
+            if authorized_customer and not sess.customer_id:
+                sess.customer_id = authorized_customer
 
             # The user message and every state-changing tool execute inside the same
             # per-conversation lock as session mutation.
@@ -138,6 +178,7 @@ class ConversationService:
         conversation_id: str | None,
         message: str,
         *,
+        principal: Principal,
         channel: str = "web",
         request_id: str = "req",
     ) -> tuple[OrchestratorResult, Session, Conversation]:
@@ -146,6 +187,7 @@ class ConversationService:
             db,
             conversation_id,
             message,
+            principal=principal,
             channel=channel,
             request_id=request_id,
         )

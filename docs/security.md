@@ -14,6 +14,18 @@ have already been verified and authorized.
 
 ## Deterministic Identity Verification
 
+Before this domain-level verification runs, production requests must carry an OIDC
+access token. The API resolves its signing key from the configured JWKS, permits only
+the configured asymmetric algorithm, and validates issuer, audience, subject, issued-at,
+and expiry claims. The stable subject owns each conversation; presenting a valid token
+with a different subject returns 403 even when the conversation UUID is known.
+
+Customer routes also require the configured customer-ID claim. Administrative routes
+instead require one of the configured workforce roles. Browser WebSockets authenticate
+with the configured HttpOnly access-token cookie after exact Origin validation. The
+local synthetic demo keeps authentication disabled explicitly; production startup
+rejects that configuration.
+
 Verification is a pure, rule-based function of the factors a caller supplies —
 there is no model in the loop and no probabilistic scoring of identity.
 
@@ -44,7 +56,10 @@ When verification succeeds, the verified customer is **bound to the session**.
 Every subsequent request in that session operates against that one customer
 identity. A session can never be re-pointed at a different customer by anything
 the caller (or the model) says. This is the foundation of cross-customer
-prevention: the "who" is fixed at verification time and enforced server-side.
+prevention: the "who" is fixed at verification time and enforced server-side. Session
+state is serialized in Redis with a configured TTL and a distributed per-conversation
+lock, so verification and pending transactions survive API restarts without concurrent
+lost updates.
 
 ---
 

@@ -31,6 +31,7 @@ For a regulated domain that buys three things:
 flowchart TD
     Phone[Phone - Twilio] --> API
     Web[React app] <--> API[FastAPI gateway]
+    OIDC[OIDC identity + JWKS] --> API
     API --> STT[STT<br/>whisper / mock / Web Speech]
     API --> TTS[TTS<br/>Piper / mock]
     API --> ORCH[Orchestrator<br/>deterministic intent router]
@@ -57,6 +58,7 @@ capability. ~6.8k lines of Python.
 |---|---|
 | Deterministic intent router + tool planner (not an LLM agent loop) | Auditable, reproducible, safe by construction — the LLM only phrases |
 | Verification + ownership gate on **every** protected tool | Security cannot be prompt-injected away |
+| OIDC subject owns each conversation; workforce roles guard admin APIs | A leaked conversation ID or customer token cannot cross identity boundaries |
 | Model providers swappable behind interfaces; mock defaults | Runs anywhere with zero downloads; drop in Ollama/OpenAI/Whisper/Piper/sentence-transformers via config |
 | RAG returns only real, cited passages | Fabricated coverage is structurally impossible |
 | One backend, health-gated startup | Simple to run and reason about; no sleep-timer races |
@@ -119,7 +121,7 @@ Providers are config-selected (`.env`); see [model setup](#model-providers).
 ## Verify it
 
 ```bash
-make test   # 83 tests: unit + API + WebSocket + voice + payments + evals (SQLite, mock providers)
+make test   # 93 tests: unit + API + WebSocket + voice + payments + evals (SQLite, mock providers)
 make eval   # 38 eval cases through the real orchestrator; report persisted to the DB + admin UI
 ```
 
