@@ -21,8 +21,30 @@ KNOWLEDGE_DIR = Path(__file__).resolve().parents[1] / "knowledge"
 # Point the GLOBAL engine (used by the FastAPI app) at a throwaway SQLite DB, before
 # any insurance_ai import triggers settings caching. Per-test fixtures still use their
 # own isolated temp DBs.
-_GLOBAL_DB = Path(__file__).resolve().parent / ".api_test.db"
+#
+# The filename is unique per process (PID, plus the xdist worker id when running under
+# `pytest -n`), so two pytest runs in the same working tree -- or two xdist workers --
+# never share a file. `api_client`/`global_db_seeded` drop and recreate the schema on
+# the global engine, which would otherwise corrupt a concurrent run.
+#
+# `setdefault` means an explicitly exported INSURANCE_AI_DATABASE_URL still wins (CI's
+# eval job points the suite at a real Postgres service).
+_WORKER_ID = os.environ.get("PYTEST_XDIST_WORKER", "main")
+_GLOBAL_DB = Path(__file__).resolve().parent / f".api_test.{_WORKER_ID}.{os.getpid()}.db"
 os.environ.setdefault("INSURANCE_AI_DATABASE_URL", f"sqlite+aiosqlite:///{_GLOBAL_DB}")
+_OWNS_GLOBAL_DB = os.environ["INSURANCE_AI_DATABASE_URL"].endswith(str(_GLOBAL_DB))
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remove this process's throwaway SQLite files once the run is over."""
+    if not _OWNS_GLOBAL_DB:
+        return
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        candidate = Path(str(_GLOBAL_DB) + suffix)
+        try:
+            candidate.unlink()
+        except OSError:
+            pass
 
 from insurance_ai.db.init import create_schema
 from insurance_ai.db.seed import seed
