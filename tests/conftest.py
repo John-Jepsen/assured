@@ -24,13 +24,12 @@ KNOWLEDGE_DIR = Path(__file__).resolve().parents[1] / "knowledge"
 _GLOBAL_DB = Path(__file__).resolve().parent / ".api_test.db"
 os.environ.setdefault("INSURANCE_AI_DATABASE_URL", f"sqlite+aiosqlite:///{_GLOBAL_DB}")
 
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
-
-from insurance_ai.db.init import create_schema  # noqa: E402
-from insurance_ai.db.seed import seed  # noqa: E402
-from insurance_ai.providers.factory import get_providers  # noqa: E402
-from insurance_ai.rag.ingest import ingest_directory  # noqa: E402
-from insurance_ai.security.session import Session  # noqa: E402
+from insurance_ai.db.init import create_schema
+from insurance_ai.db.seed import seed
+from insurance_ai.providers.factory import get_providers
+from insurance_ai.rag.ingest import ingest_directory
+from insurance_ai.security.session import Session
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest_asyncio.fixture
@@ -59,7 +58,6 @@ async def db(sessionmaker):
 async def api_client():
     """TestClient over the real ASGI app, backed by the global test DB (seeded)."""
     from fastapi.testclient import TestClient
-
     from insurance_ai.api.app import app
     from insurance_ai.db.base import get_engine
     from insurance_ai.db.init import create_schema, drop_schema

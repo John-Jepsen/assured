@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from alembic import op
 
-from insurance_ai.db.base import Base
 from insurance_ai.db import models  # noqa: F401  (populate metadata)
+from insurance_ai.db.base import Base
 
 revision = "0001_initial"
 down_revision = None

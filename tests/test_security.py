@@ -6,11 +6,9 @@ These assert OUTCOMES the spec's Definition of Done requires, not implementation
 from __future__ import annotations
 
 import pytest
-
-from insurance_ai.security.authorization import AuthorizationError
 from insurance_ai.security.verification import VerificationClaim, verify_identity
-from insurance_ai.tools.registry import get_tool, load_all_tools
 from insurance_ai.tools.base import ToolContext
+from insurance_ai.tools.registry import get_tool, load_all_tools
 
 load_all_tools()
 

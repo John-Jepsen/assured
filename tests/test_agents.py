@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from insurance_ai.agents.intent import detect
 from insurance_ai.agents.orchestrator import Orchestrator
 from insurance_ai.domain.enums import AgentName

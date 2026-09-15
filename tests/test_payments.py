@@ -4,7 +4,6 @@ and honest failure reporting (never claims success when the charge failed)."""
 from __future__ import annotations
 
 import pytest
-
 from insurance_ai.payments import MockPaymentProvider
 from insurance_ai.security.verification import VerificationClaim, verify_identity
 from insurance_ai.tools.base import ToolContext

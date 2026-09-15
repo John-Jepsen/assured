@@ -13,8 +13,8 @@ from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from insurance_ai.config import get_settings
-from insurance_ai.db.base import Base
 from insurance_ai.db import models  # noqa: F401  (register all tables on the metadata)
+from insurance_ai.db.base import Base
 
 config = context.config
 target_metadata = Base.metadata
