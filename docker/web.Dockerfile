@@ -1,5 +1,5 @@
 # Insurance AI — React frontend, built then served by nginx (proxies API + WS).
-FROM node:20-alpine AS build
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS build
 WORKDIR /web
 COPY apps/web/package.json apps/web/package-lock.json* ./
 RUN npm ci --no-audit --no-fund
@@ -9,7 +9,8 @@ ENV VITE_API_BASE=""
 ENV VITE_WS_BASE=""
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+RUN apk upgrade --no-cache
 COPY docker/web-nginx.conf /etc/nginx/nginx.conf
 COPY --chown=nginx:nginx --from=build /web/dist /usr/share/nginx/html
 

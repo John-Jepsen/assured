@@ -59,8 +59,10 @@ As of the review date:
 - The API and web images run as non-root with read-only filesystems, dropped Linux
   capabilities, and `no-new-privileges` in the Compose baseline.
 - A root `.dockerignore` reduces the integrated build contexts to less than 200 KB.
-- CI exercises mock providers, native pgvector, and hardened runtime image builds. Image
-  vulnerability scanning, signing, and a live production-model evaluation remain open.
+- CI exercises mock providers, native pgvector, and hardened runtime image builds; it
+  blocks fixable critical image vulnerabilities and publishes SPDX JSON SBOMs. Dependency
+  hash locking, image signing, provenance, and a live production-model evaluation remain
+  open.
 
 The highest-risk implementation gaps are:
 
@@ -75,7 +77,7 @@ The highest-risk implementation gaps are:
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
 | Startup | Compose separates migrations, synthetic seeding, ingestion, and API serving into dependency-gated jobs | The selected production orchestrator still needs equivalent release jobs, concurrency protection, and content-versioned ingestion |
 | Readiness | `/ready` returns HTTP 503 when PostgreSQL, the configured session store, or the configured model is unavailable; an open model circuit also fails readiness | Production provider warmup and dependency failure injection remain open |
-| Supply chain | Runtime image checks exist, but dependencies/tags remain broad and images are not scanned or signed | Builds are not fully reproducible and dependency changes can reach production unreviewed |
+| Supply chain | Base/service images and CI actions are immutable, Dependabot proposes reviewed updates, and CI scans both application images and emits SPDX SBOMs | Python hashes, signing, provenance, license policy, and registry enforcement remain open |
 
 ## Target architecture
 

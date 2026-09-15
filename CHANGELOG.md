@@ -43,6 +43,10 @@ All notable changes to this project are documented here.
 - **Model-aware readiness.** The readiness endpoint now verifies that the configured
   model is advertised by the OpenAI-compatible inference service and returns HTTP 503
   while that service is unavailable, malformed, or protected by an open circuit.
+- **Supply-chain CI foundation.** Application and service images are pinned to immutable
+  registry digests, GitHub Actions are pinned to exact commits, Dependabot covers Python,
+  npm, Docker, and workflow dependencies, and CI blocks fixable critical image findings
+  while publishing SPDX JSON SBOMs for both application images.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

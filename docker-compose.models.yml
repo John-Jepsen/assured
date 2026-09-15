@@ -12,7 +12,7 @@
 
 services:
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:latest@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba
     volumes:
       - ollamadata:/root/.ollama
     ports:
@@ -26,7 +26,7 @@ services:
 
   # One-shot: pull the models, then exit. API waits for this to complete.
   model-init:
-    image: ollama/ollama:latest
+    image: ollama/ollama:latest@sha256:684d8674b4315fa18f4f0e973a118ec2652ed96f67563277839985175858e0ba
     depends_on:
       ollama:
         condition: service_healthy
