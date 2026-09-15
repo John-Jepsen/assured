@@ -11,13 +11,27 @@ import pytest
 
 class _FakeWS:
     """Records server->client frames; each send yields control so a mid-response
-    cancellation (barge-in) can land between frames."""
+    cancellation (barge-in) can land between frames.
 
-    def __init__(self) -> None:
+    ``signal_on`` names a frame type to announce through :attr:`reached`, which lets a
+    test cancel at a defined point in the response instead of racing a wall-clock
+    sleep. That matters for more than determinism: ``_run_response`` streams its audio
+    while a database session is open, and cancelling a task *mid-statement* abandons
+    the driver connection (SQLAlchemy cannot reset a connection whose in-flight
+    operation was cancelled), which leaves a SQLite write lock behind until the
+    orphaned connection is garbage collected. Cancelling on a frame boundary keeps the
+    interruption off the database and still exercises the real barge-in path.
+    """
+
+    def __init__(self, signal_on: str | None = None) -> None:
         self.sent: list[dict] = []
+        self._signal_on = signal_on
+        self.reached = asyncio.Event()
 
     async def send_json(self, payload: dict) -> None:
         self.sent.append(payload)
+        if payload.get("type") == self._signal_on:
+            self.reached.set()
         await asyncio.sleep(0.005)
 
 
@@ -51,7 +65,9 @@ async def test_barge_in_cancels_in_flight_response(global_db_seeded):
     from insurance_ai.api.routes_voice import _run_response
     from insurance_ai.security.identity import demo_principal
 
-    ws = _FakeWS()
+    # Cancel on the first audio frame: the assistant is demonstrably speaking, which is
+    # the only moment a user can actually barge in on.
+    ws = _FakeWS(signal_on="audio")
     task = asyncio.create_task(
         _run_response(
             ws,
@@ -65,11 +81,12 @@ async def test_barge_in_cancels_in_flight_response(global_db_seeded):
             request_id="rid-voice",
         )
     )
-    await asyncio.sleep(0.008)  # let it start streaming
+    await asyncio.wait_for(ws.reached.wait(), timeout=10)
     task.cancel()  # user barged in
     with pytest.raises(asyncio.CancelledError):
         await task
-    # It was interrupted before completing — no terminal 'done' frame was sent.
+    # It was interrupted mid-speech, before completing — no terminal 'done' frame.
+    assert any(m["type"] == "audio" for m in ws.sent)
     assert not any(m["type"] == "done" for m in ws.sent)
 
 
