@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, date, datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -266,8 +267,18 @@ class DocumentChunk(Base):
     product_type: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     category: Mapped[str] = mapped_column(String, index=True)
     # Portable embedding storage (float array as JSON). pgvector backend mirrors
-    # this into a native vector column via migration for ANN search.
+    # this into a native vector column for database-side nearest-neighbour search.
+    #
+    # The Postgres column intentionally has no fixed typmod: changing embedding
+    # models must not make old rows unreadable. ``embedding_dim`` is part of every
+    # pgvector query, and migrations add a dimension-specific expression index for
+    # the production dimension. SQLite uses JSON for the mirror so create_all and
+    # the deterministic test suite remain portable.
     embedding: Mapped[list] = mapped_column(JSON, default=list)
+    embedding_vector: Mapped[list | None] = mapped_column(
+        Vector().with_variant(JSON(), "sqlite"), nullable=True
+    )
+    embedding_dim: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
     document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")
 

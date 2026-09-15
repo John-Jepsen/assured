@@ -11,6 +11,7 @@ from insurance_ai.config import get_settings
 from insurance_ai.db.models import DocumentChunk, KnowledgeDocument
 from insurance_ai.providers.base import EmbeddingProvider
 from insurance_ai.rag.chunking import chunk_text, parse_document
+from insurance_ai.rag.vector import validate_embedding
 
 
 async def ingest_directory(
@@ -50,6 +51,11 @@ async def ingest_directory(
         )
         embeddings = await embedder.embed([c.content for c in chunks])
         for chunk, emb in zip(chunks, embeddings, strict=True):
+            vector = validate_embedding(
+                emb,
+                expected_dim=embedder.dim,
+                context=f"{embedder.name} embedding provider",
+            )
             db.add(
                 DocumentChunk(
                     document_id=doc.id,
@@ -58,7 +64,9 @@ async def ingest_directory(
                     citation=f"{parsed.title}",
                     product_type=parsed.product_type,
                     category=parsed.category,
-                    embedding=emb,
+                    embedding=vector,
+                    embedding_vector=vector,
+                    embedding_dim=len(vector),
                 )
             )
             n_chunks += 1

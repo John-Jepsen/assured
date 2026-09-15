@@ -17,12 +17,16 @@ from collections import Counter
 from dataclasses import dataclass
 
 import numpy as np
-from sqlalchemy import select
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import cast, literal_column, select
+from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
 from insurance_ai.config import get_settings
 from insurance_ai.db.models import DocumentChunk
 from insurance_ai.providers.base import EmbeddingProvider
+from insurance_ai.rag.vector import validate_embedding
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _LEX_STOP = frozenset(
@@ -141,6 +145,47 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return (b @ a) / denom
 
 
+def build_pgvector_statement(
+    query_vector: list[float],
+    *,
+    product_type: str | None,
+    category: str | None,
+    min_score: float,
+    limit: int,
+) -> Select:
+    """Build the native cosine top-k query.
+
+    The dimension is validated before reaching this helper and rendered as a SQL
+    literal. This is deliberate: Postgres cannot prove a parameterized dimension
+    predicate implies the partial HNSW index predicate, so a bound dimension would
+    silently force a sequential scan. No user-controlled text is rendered here.
+    """
+    dimension = len(query_vector)
+    dimension_literal = literal_column(str(dimension))
+    indexed_vector = cast(DocumentChunk.embedding_vector, Vector(dimension))
+    distance = indexed_vector.cosine_distance(query_vector)
+    score = (1.0 - distance).label("score")
+
+    stmt = (
+        select(DocumentChunk, score)
+        .where(
+            DocumentChunk.embedding_vector.is_not(None),
+            DocumentChunk.embedding_dim == dimension_literal,
+            distance <= 1.0 - min_score,
+        )
+        .order_by(distance)
+        .limit(limit)
+    )
+    if product_type:
+        stmt = stmt.where(
+            (DocumentChunk.product_type == product_type)
+            | (DocumentChunk.product_type.is_(None))
+        )
+    if category:
+        stmt = stmt.where(DocumentChunk.category == category)
+    return stmt
+
+
 class Retriever:
     def __init__(self, embedder: EmbeddingProvider) -> None:
         self.embedder = embedder
@@ -156,37 +201,29 @@ class Retriever:
         top_k: int | None = None,
     ) -> list[Retrieved]:
         top_k = top_k or self.settings.rag_top_k
-        stmt = select(DocumentChunk)
-        if product_type:
-            # include product-specific and product-agnostic (null) chunks
-            stmt = stmt.where(
-                (DocumentChunk.product_type == product_type)
-                | (DocumentChunk.product_type.is_(None))
-            )
-        if category:
-            stmt = stmt.where(DocumentChunk.category == category)
-        rows = list((await db.execute(stmt)).scalars().all())
-        if not rows:
-            return []
+        pool_size = max(top_k, self.settings.rag_candidate_pool)
 
-        # Lexical/hash default → BM25 (IDF-weighted, robust for offline retrieval).
-        # A real embedding model → dense cosine similarity.
-        if self.embedder.name in ("hash", "mock"):
-            scored = self._bm25(query, rows)
-            min_score = self.settings.rag_min_score
+        if self.settings.vector_backend == "pgvector":
+            scored = await self._search_pgvector(
+                db,
+                query,
+                product_type=product_type,
+                category=category,
+                limit=pool_size,
+            )
         else:
-            qvec = np.array(await self.embedder.embed_one(query), dtype=np.float32)
-            matrix = np.array([r.embedding for r in rows], dtype=np.float32)
-            sims = _cosine(qvec, matrix)
-            scored = sorted(zip(rows, sims.tolist(), strict=True), key=lambda x: -x[1])
-            min_score = self.settings.rag_min_score
+            scored = await self._search_in_process(
+                db,
+                query,
+                product_type=product_type,
+                category=category,
+            )
 
         # Build a candidate pool (>= top_k) that clears the threshold, then optionally
         # rerank the pool and return the best top_k.
-        pool_size = max(top_k, self.settings.rag_candidate_pool)
         pool: list[Retrieved] = []
         for chunk, score in scored:
-            if score < min_score:
+            if score < self.settings.rag_min_score:
                 continue
             pool.append(
                 Retrieved(
@@ -206,6 +243,78 @@ class Retriever:
 
             pool = rerank(self.settings.rag_rerank, query, pool, self.settings.rag_reranker_model)
         return pool[:top_k]
+
+    async def _search_in_process(
+        self,
+        db: AsyncSession,
+        query: str,
+        *,
+        product_type: str | None,
+        category: str | None,
+    ) -> list[tuple[DocumentChunk, float]]:
+        stmt = select(DocumentChunk)
+        if product_type:
+            # include product-specific and product-agnostic (null) chunks
+            stmt = stmt.where(
+                (DocumentChunk.product_type == product_type)
+                | (DocumentChunk.product_type.is_(None))
+            )
+        if category:
+            stmt = stmt.where(DocumentChunk.category == category)
+        rows = list((await db.execute(stmt)).scalars().all())
+        if not rows:
+            return []
+
+        # Lexical/hash default → BM25 (IDF-weighted, robust for offline retrieval).
+        # A real embedding model → dense cosine similarity.
+        if self.embedder.name in ("hash", "mock"):
+            scored = self._bm25(query, rows)
+        else:
+            vector = validate_embedding(
+                await self.embedder.embed_one(query),
+                expected_dim=self.embedder.dim,
+                context=f"{self.embedder.name} query embedding",
+            )
+            qvec = np.array(vector, dtype=np.float32)
+            matrix = np.array([r.embedding for r in rows], dtype=np.float32)
+            if matrix.ndim != 2 or matrix.shape[1] != len(vector):
+                raise ValueError(
+                    "stored embeddings do not match the query embedding dimension; "
+                    "re-ingest the knowledge base"
+                )
+            sims = _cosine(qvec, matrix)
+            scored = sorted(zip(rows, sims.tolist(), strict=True), key=lambda x: -x[1])
+        return scored
+
+    async def _search_pgvector(
+        self,
+        db: AsyncSession,
+        query: str,
+        *,
+        product_type: str | None,
+        category: str | None,
+        limit: int,
+    ) -> list[tuple[DocumentChunk, float]]:
+        dialect: Dialect = db.get_bind().dialect
+        if dialect.name != "postgresql":
+            raise RuntimeError(
+                "vector_backend=pgvector requires PostgreSQL with the vector extension; "
+                "use vector_backend=numpy for SQLite"
+            )
+        vector = validate_embedding(
+            await self.embedder.embed_one(query),
+            expected_dim=self.embedder.dim,
+            context=f"{self.embedder.name} query embedding",
+        )
+        stmt = build_pgvector_statement(
+            vector,
+            product_type=product_type,
+            category=category,
+            min_score=self.settings.rag_min_score,
+            limit=limit,
+        )
+        result = await db.execute(stmt)
+        return [(chunk, float(score)) for chunk, score in result.all()]
 
     def _bm25(self, query: str, rows: list, k1: float = 1.5, b: float = 0.75):
         """BM25 over the candidate chunks, normalised to ~[0,1] by the best score."""

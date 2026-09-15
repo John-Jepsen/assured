@@ -41,10 +41,26 @@ not pipeline shape.
 ## Vector Storage
 
 Vectors are stored as **JSON float arrays** with a **numpy cosine-similarity
-fallback** backend for local and test environments. In production, the same
-vectors live in a **Postgres `pgvector`** column. Retrieval logic is identical
-across both backends; only the similarity computation differs (in-process numpy
-vs. database-side pgvector).
+fallback** backend for local and test environments. Every chunk also has a native
+**Postgres `pgvector`** mirror and an `embedding_dim` marker. Ingestion validates
+that vectors are non-empty, finite, and match the provider's declared dimension
+before writing both representations.
+
+With `vector_backend=pgvector`, filtering, cosine scoring, score thresholding,
+ordering, and candidate limiting all happen in PostgreSQL. The API does not load
+the corpus into memory. SQLite rejects that backend with an actionable error;
+use `vector_backend=numpy` there.
+
+The native column is intentionally unconstrained (`vector`, not `vector(512)`) so
+an embedding-model change cannot make the table unreadable. Queries always filter
+on `embedding_dim` and cast to the query dimension. Migration
+`0002_pgvector_retrieval` backfills existing JSON embeddings, enforces agreement
+between the dimension marker and native vector, and creates a partial HNSW cosine
+index for the default 512-dimensional deployment. PostgreSQL can still perform a
+correct exact top-k search for another dimension, but production deployments must
+add a matching dimension-specific expression index in a follow-up migration before
+switching models. Re-ingest the entire corpus as part of that model change; never
+mix embeddings from different model revisions even when their dimensions match.
 
 ## Retrieval
 
@@ -57,6 +73,11 @@ A query is embedded with the same provider used at ingestion, then compared by
 - **Product / category filtering** — front-matter metadata narrows the candidate
   set (e.g., an auto-policy question only searches auto content), improving
   precision and preventing cross-product leakage.
+
+The pgvector backend requests `max(top_k, rag_candidate_pool)` rows so optional
+reranking sees the same candidate count as the in-process backend. The default
+hash/mock embedding path continues to use BM25 when `vector_backend=numpy`; this
+keeps deterministic offline retrieval unchanged.
 
 Surviving chunks are passed to the specialist agent as **untrusted context**:
 they are sanitized against prompt injection and kept separate from system, user,

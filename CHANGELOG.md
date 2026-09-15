@@ -11,6 +11,9 @@ All notable changes to this project are documented here.
 - **Dedicated Hugging Face model serving.** Added a pinned vLLM GPU overlay and a
   persistent OpenAI-compatible provider with streaming, bounded retry, explicit
   timeouts, clean shutdown, and immutable model revision metadata.
+- **Native pgvector retrieval.** Added validated vector mirrors, database-side filtered
+  cosine top-k search, a dimension-aware HNSW migration, portable fallback behavior,
+  and an opt-in real-Postgres integration test.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

@@ -1,8 +1,8 @@
 """Async engine + session factory.
 
-The vector column type adapts to the configured backend: real ``pgvector`` in
-Postgres, or a JSON-encoded float array on SQLite / non-pgvector Postgres (the
-``numpy`` fallback backend). This keeps the schema identical across environments.
+Document vectors use pgvector on PostgreSQL and a JSON type variant on SQLite.
+The retrieval backend controls where scoring happens; it does not alter the
+database schema, which keeps migrations deterministic across deployments.
 """
 
 from __future__ import annotations

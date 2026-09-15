@@ -47,7 +47,8 @@ organizational approval.
 
 As of the review date:
 
-- 42 backend tests pass and Ruff reports no findings.
+- 58 backend tests pass, the opt-in pgvector integration test passes against PostgreSQL,
+  and Ruff reports no findings.
 - Docker Compose validates, and the API and web images build.
 - The frontend TypeScript/Vite production build succeeds.
 - The standard API image intentionally does not contain `torch` or `transformers`; the
@@ -67,7 +68,7 @@ The highest-risk implementation gaps are:
 | Demo identity | A fixed OTP and a public synthetic customer directory are enabled | Demo controls cannot be allowed in a real environment |
 | LLM runtime | A remote-provider and vLLM foundation exists but is not capacity-tested | Safe concurrency, model quality, and GPU sizing are not yet established |
 | Channel consistency | REST returns the deterministic draft while WebSockets stream an LLM rewrite | The displayed, returned, and persisted answers can differ |
-| Retrieval | Dense search loads all candidate embeddings into API memory | Search cost grows linearly; the `pgvector` setting does not currently perform database vector search |
+| Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
 | Startup | Every API replica runs migrations and knowledge ingestion | Deployments can race and model-backed ingestion delays every replica startup |
 | Readiness | `/ready` checks only PostgreSQL and returns HTTP 200 when not ready | An orchestrator can route traffic to a nonfunctional instance |
 | Supply chain | Broad dependency ranges, mutable image tags, and no image scan/sign step | Builds are not reproducible and dependency changes can reach production unreviewed |

@@ -1,8 +1,9 @@
 """Schema creation + pgvector bootstrap.
 
-For local/dev/test we use ``create_all`` (fast, portable). Production Docker runs
-the same DDL plus the pgvector migration in ``migrations/``. Enabling the pgvector
-extension is attempted best-effort and skipped silently on SQLite / when absent.
+For local/dev/test we use ``create_all`` (fast, portable); production uses the
+versioned Alembic migrations. PostgreSQL always stores the native vector mirror,
+even when retrieval uses numpy, so a missing extension is a schema error rather
+than a condition to hide. SQLite uses the model's JSON type variant.
 """
 
 from __future__ import annotations
@@ -14,14 +15,9 @@ from insurance_ai.db.base import Base
 
 
 async def create_schema(engine: AsyncEngine) -> None:
-    # Attempt the pgvector extension in an ISOLATED transaction: if it is not
-    # installed the failure must not poison the create_all transaction.
     if engine.dialect.name == "postgresql":
-        try:
-            async with engine.begin() as conn:
-                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        except Exception:
-            pass  # pgvector optional; numpy/BM25 backend still works
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

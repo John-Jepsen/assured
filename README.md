@@ -115,11 +115,12 @@ Providers are config-selected (`.env`); see [model setup](#model-providers).
 ## Verify it
 
 ```bash
-make test   # 42 tests: unit + API + WebSocket + voice + payments + evals (SQLite, mock providers)
+make test   # 58 tests: unit + API + WebSocket + voice + payments + evals (SQLite, mock providers)
 make eval   # 38 eval cases through the real orchestrator; report persisted to the DB + admin UI
 ```
 
-Tests assert **behavior**, not implementation: an unverified user cannot read policy
+The pgvector suite also has an opt-in real-Postgres integration test. Tests assert
+**behavior**, not implementation: an unverified user cannot read policy
 details, cross-customer access fails, barge-in cancels the in-flight response. Evals
 (routing, policy, claims, billing, security, rag, conversations) check routing, tool
 choice/args, grounding, authorization, hallucination-resistance, escalation, and latency.
