@@ -43,6 +43,7 @@ class Trace:
     verification_status: str = "unverified"
     escalated: bool = False
     latencies_ms: dict[str, float] = field(default_factory=dict)
+    model: dict[str, str | None] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +56,7 @@ class Trace:
             "verification_status": self.verification_status,
             "escalated": self.escalated,
             "latencies_ms": self.latencies_ms,
+            "model": self.model,
         }
 
 
@@ -217,6 +219,12 @@ class Orchestrator:
         trace.sources = [_source_dict(s) for s in sources]
         trace.escalated = escalated or session.escalated
         trace.verification_status = session.verification_status
+        if self.providers.llm.metadata:
+            trace.model = {
+                "provider": self.providers.llm.metadata.provider,
+                "model": self.providers.llm.metadata.model,
+                "revision": self.providers.llm.metadata.revision,
+            }
         trace.latencies_ms["total_plan_ms"] = (time.perf_counter() - t0) * 1000
         return OrchestratorResult(answer=draft, trace=trace, needs_verification=needs_verification)
 

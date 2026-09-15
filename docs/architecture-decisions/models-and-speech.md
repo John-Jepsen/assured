@@ -17,9 +17,10 @@ considered, and the conditions under which we would revisit them.
 ### Language model (LLM)
 
 - **Default:** open-source / local. The out-of-the-box provider is a grounded
-  `MockLLM` composer for deterministic tests and demos. The real local adapter runs
-  small instruction-tuned open-weights models (e.g. Qwen-Instruct or Llama-Instruct)
-  via an **Ollama** or **HF transformers** backend.
+  `MockLLM` composer for deterministic tests and demos. Real models run behind a
+  dedicated OpenAI-compatible endpoint: **Ollama** for the CPU-friendly local profile,
+  or a pinned **vLLM/Hugging Face** deployment for the GPU production path. Model
+  weights are never loaded into the FastAPI process.
 - **Optional:** any **OpenAI-compatible** endpoint, selected purely by config.
 
 The LLM never selects tools or authorizes actions. Tool selection is a deterministic,
@@ -61,10 +62,10 @@ never re-download.
 
 | Profile        | LLM                   | STT / TTS               |
 |----------------|-----------------------|-------------------------|
-| local-cpu (default) | mock / small local | faster-whisper small, Piper |
+| local-cpu (default) | mock / Ollama sidecar | faster-whisper small, Piper |
 | apple-silicon  | small local           | faster-whisper, Piper   |
-| nvidia         | larger local          | larger Whisper, Kokoro  |
-| cloud-gpu      | OpenAI-compatible / large | large Whisper, Kokoro |
+| nvidia         | dedicated vLLM endpoint | larger Whisper, Kokoro  |
+| cloud-gpu      | HF endpoint / dedicated vLLM | large Whisper, Kokoro |
 
 ## Why business logic is decoupled from any single model
 

@@ -143,11 +143,16 @@ async def test_non_streaming_turn_persists_model_rendered_answer(db):
     from insurance_ai.agents.orchestrator import Orchestrator
     from insurance_ai.api.service import ConversationService
     from insurance_ai.config import Settings
-    from insurance_ai.providers.base import ChatMessage, LLMProvider
+    from insurance_ai.providers.base import ChatMessage, LLMMetadata, LLMProvider
     from insurance_ai.providers.factory import Providers
 
     class RewritingLLM(LLMProvider):
         name = "test-rewriter"
+        metadata = LLMMetadata(
+            provider="test-rewriter",
+            model="test-model",
+            revision="test-revision",
+        )
 
         async def complete(self, messages: list[ChatMessage], **kwargs) -> str:
             return "".join([token async for token in self.stream(messages, **kwargs)])
@@ -168,4 +173,9 @@ async def test_non_streaming_turn_persists_model_rendered_answer(db):
     transcript = await service.transcript(db, conversation.id)
 
     assert result.answer == "Model-rendered answer."
+    assert result.trace.model == {
+        "provider": "test-rewriter",
+        "model": "test-model",
+        "revision": "test-revision",
+    }
     assert transcript[-1]["content"] == result.answer

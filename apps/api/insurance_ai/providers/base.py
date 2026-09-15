@@ -13,6 +13,16 @@ class ChatMessage:
     content: str
 
 
+@dataclass(frozen=True)
+class LLMMetadata:
+    """Non-secret model identity attached to a provider instance."""
+
+    provider: str
+    model: str
+    revision: str | None = None
+    endpoint: str | None = None
+
+
 @dataclass
 class TranscriptChunk:
     text: str
@@ -42,6 +52,7 @@ class LLMProvider(ABC):
     """Text generation. Must support streaming; pydantic-ai wraps these for agents."""
 
     name: str = "base"
+    metadata: LLMMetadata | None = None
 
     @abstractmethod
     async def complete(self, messages: list[ChatMessage], **kwargs) -> str: ...
@@ -52,6 +63,10 @@ class LLMProvider(ABC):
     def pydantic_model(self):  # pragma: no cover - overridden where supported
         """Return a pydantic-ai Model, or None to force the rule-based fallback."""
         return
+
+    async def aclose(self) -> None:
+        """Release provider resources when the application shuts down."""
+        return None
 
 
 class SpeechToTextProvider(ABC):

@@ -164,9 +164,20 @@ INSURANCE_AI_STT_PROVIDER=faster-whisper
 INSURANCE_AI_TTS_PROVIDER=piper
 ```
 
-Real adapters live behind pip extras (`pip install -e '.[speech]'`) or the Docker
-overlays above. Hardware-profile guidance and semantic-retrieval tuning are in
+Speech and local embedding adapters live behind the `speech` pip extra; remote LLM
+support is part of the core API install. Hardware-profile guidance and semantic-retrieval
+tuning are in
 [`docs/rag.md`](docs/rag.md) and the [models ADR](docs/architecture-decisions/models-and-speech.md).
+
+For a dedicated GPU-backed Hugging Face model server, use the pinned vLLM overlay:
+
+```bash
+VLLM_API_KEY=change-me docker compose \
+  -f docker-compose.yml -f docker-compose.vllm.yml up --build
+```
+
+The API calls the model over the private Compose network; model weights are not loaded
+into API workers.
 
 **Optional integrations** — [Twilio telephony](docs/architecture-decisions/telephony.md),
 Stripe test-mode payments, and reranking/OpenTelemetry are credential- or config-gated;

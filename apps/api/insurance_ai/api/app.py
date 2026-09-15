@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from insurance_ai import __version__
 from insurance_ai.config import get_settings
 from insurance_ai.observability import configure_logging, get_logger, setup_tracing
+from insurance_ai.providers.factory import get_providers
 from insurance_ai.tools.registry import load_all_tools
 
 log = get_logger("api")
@@ -29,7 +30,14 @@ async def lifespan(app: FastAPI):
             "tts": get_settings().tts_provider,
         },
     )
-    yield
+    try:
+        yield
+    finally:
+        # Remote providers intentionally keep connection pools for the process
+        # lifetime; close them cleanly during ASGI shutdown.
+        if get_providers.cache_info().currsize:
+            await get_providers().aclose()
+            get_providers.cache_clear()
 
 
 def create_app() -> FastAPI:

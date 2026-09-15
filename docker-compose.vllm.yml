@@ -1,0 +1,63 @@
+# GPU model-serving overlay. The API talks to vLLM over the private Compose network;
+# only the API/web entrypoints are published by the base compose file.
+#
+#   HF_TOKEN=... VLLM_API_KEY=... \
+#   docker compose -f docker-compose.yml -f docker-compose.vllm.yml up --build
+#
+# Image and model revision are intentionally pinned. Upgrade them through a tested,
+# reviewed change rather than pulling mutable `latest`/`main` artifacts at startup.
+
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.28.0
+    ipc: host
+    environment:
+      HF_TOKEN: "${HF_TOKEN:-}"
+    command:
+      - --model
+      - Qwen/Qwen2.5-1.5B-Instruct
+      - --revision
+      - 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+      - --served-model-name
+      - Qwen/Qwen2.5-1.5B-Instruct
+      - --api-key
+      - "${VLLM_API_KEY:-local-vllm}"
+      - --max-model-len
+      - "4096"
+    volumes:
+      - hfmodelcache:/root/.cache/huggingface
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://localhost:8000/health', timeout=2)
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 120s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  api:
+    environment:
+      INSURANCE_AI_LLM_PROVIDER: huggingface
+      INSURANCE_AI_LLM_MODEL: Qwen/Qwen2.5-1.5B-Instruct
+      INSURANCE_AI_HUGGINGFACE_MODEL_REVISION: 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+      INSURANCE_AI_HUGGINGFACE_BASE_URL: http://vllm:8000/v1
+      INSURANCE_AI_HUGGINGFACE_TOKEN: "${VLLM_API_KEY:-local-vllm}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+
+volumes:
+  hfmodelcache:

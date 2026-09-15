@@ -50,8 +50,8 @@ As of the review date:
 - 42 backend tests pass and Ruff reports no findings.
 - Docker Compose validates, and the API and web images build.
 - The frontend TypeScript/Vite production build succeeds.
-- The standard API image does not contain `torch` or `transformers`; selecting the
-  `huggingface` provider with the default build will fail.
+- The standard API image intentionally does not contain `torch` or `transformers`; the
+  `huggingface` provider uses a dedicated OpenAI-compatible model endpoint.
 - The API and web images run as root.
 - No `.dockerignore` exists, so unnecessary local content is sent to the Docker builder.
 - CI exercises mock providers but does not build, scan, or test the production model
@@ -65,7 +65,7 @@ The highest-risk implementation gaps are:
 | Conversation ownership | A caller can submit an arbitrary existing conversation ID | A leaked or discovered ID can be used to attach to another conversation |
 | Session storage | Verification and pending actions are held in process memory | State is lost on restart and differs across workers or replicas |
 | Demo identity | A fixed OTP and a public synthetic customer directory are enabled | Demo controls cannot be allowed in a real environment |
-| LLM runtime | Direct `transformers` loading occurs in the API process | Model memory is duplicated, concurrency is unbounded, and API scaling is coupled to GPU scaling |
+| LLM runtime | A remote-provider and vLLM foundation exists but is not capacity-tested | Safe concurrency, model quality, and GPU sizing are not yet established |
 | Channel consistency | REST returns the deterministic draft while WebSockets stream an LLM rewrite | The displayed, returned, and persisted answers can differ |
 | Retrieval | Dense search loads all candidate embeddings into API memory | Search cost grows linearly; the `pgvector` setting does not currently perform database vector search |
 | Startup | Every API replica runs migrations and knowledge ingestion | Deployments can race and model-backed ingestion delays every replica startup |
@@ -266,16 +266,15 @@ P0 work blocks every Internet-accessible production deployment.
 
 **Deliverables**
 
-- Add an explicit remote provider configuration instead of overloading `openai` or the
-  in-process `huggingface` provider.
+- Maintain explicit remote Hugging Face provider configuration rather than loading
+  model weights in the API process.
 - Reuse a persistent asynchronous HTTP client with connection pooling.
 - Support streaming cancellation, connect/read/overall timeouts, bounded retry with
   jitter, and a circuit breaker.
 - Forward request IDs and capture endpoint/model telemetry without logging prompts that
   contain sensitive data.
 - Apply backpressure before calling the model service.
-- Keep the direct `HFTransformersLLM` adapter as development-only, or remove it after the
-  remote path is established.
+- Keep in-process model runtimes out of the API image.
 
 **Exit gate**
 

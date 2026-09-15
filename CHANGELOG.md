@@ -8,6 +8,9 @@ All notable changes to this project are documented here.
 - **Production deployment plan.** Added a prioritized roadmap for authentication,
   durable sessions, Hugging Face model serving, pgvector retrieval, hardened containers,
   observability, release safety, and real-customer launch gates.
+- **Dedicated Hugging Face model serving.** Added a pinned vLLM GPU overlay and a
+  persistent OpenAI-compatible provider with streaming, bounded retry, explicit
+  timeouts, clean shutdown, and immutable model revision metadata.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

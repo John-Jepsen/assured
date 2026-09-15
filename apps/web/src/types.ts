@@ -27,6 +27,11 @@ export interface Trace {
   verification_status: string;
   escalated: boolean;
   latencies_ms: Record<string, number>;
+  model?: {
+    provider: string;
+    model: string;
+    revision?: string | null;
+  } | null;
 }
 
 export interface HealthResponse {

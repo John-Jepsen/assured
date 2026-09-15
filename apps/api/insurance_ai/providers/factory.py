@@ -1,6 +1,7 @@
 """Runtime selection of provider implementations from configuration.
 
-Real model adapters (faster-whisper, Piper, Ollama/OpenAI, sentence-transformers)
+Real model adapters (faster-whisper, Piper, remote OpenAI-compatible LLMs,
+sentence-transformers)
 are imported lazily so the deterministic core and its tests never require heavy
 ML dependencies. Selecting a real provider without its extra installed raises a
 clear, actionable error at startup.
@@ -30,16 +31,10 @@ def _missing(extra: str, provider: str) -> ImportError:
 def build_llm(settings: Settings) -> LLMProvider:
     if settings.llm_provider == "mock":
         return MockLLM()
-    if settings.llm_provider in ("openai", "ollama"):
+    if settings.llm_provider in ("openai", "ollama", "huggingface"):
         from insurance_ai.providers.openai_compat import OpenAICompatLLM
 
         return OpenAICompatLLM(settings)
-    if settings.llm_provider == "huggingface":
-        try:
-            from insurance_ai.providers.hf_llm import HFTransformersLLM
-        except ImportError as e:  # pragma: no cover
-            raise _missing("speech", "huggingface") from e
-        return HFTransformersLLM(settings)
     raise ValueError(f"Unknown llm_provider: {settings.llm_provider}")
 
 
@@ -96,6 +91,10 @@ class Providers:
         self.stt = build_stt(settings)
         self.tts = build_tts(settings)
         self.embedding = build_embedding(settings)
+
+    async def aclose(self) -> None:
+        """Release long-lived network clients owned by providers."""
+        await self.llm.aclose()
 
 
 @lru_cache

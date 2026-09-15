@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 HardwareProfile = Literal["local-cpu", "apple-silicon", "nvidia", "cloud-gpu"]
@@ -69,7 +69,18 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     ollama_base_url: str = "http://localhost:11434"
+    # OpenAI-compatible endpoint exposed by a dedicated Hugging Face/vLLM
+    # deployment. Model weights are deliberately not loaded in the API process.
+    huggingface_base_url: str = "http://localhost:8001/v1"
     huggingface_token: str | None = None
+    huggingface_model_revision: str | None = None
+    llm_connect_timeout_seconds: float = Field(default=10.0, gt=0)
+    llm_request_timeout_seconds: float = Field(default=120.0, gt=0)
+    llm_max_retries: int = Field(default=2, ge=0, le=10)
+    llm_retry_backoff_seconds: float = Field(default=0.25, ge=0, le=60)
+    llm_max_connections: int = Field(default=100, gt=0)
+    llm_max_keepalive_connections: int = Field(default=20, ge=0)
+    llm_max_tokens: int = Field(default=400, gt=0)
 
     # --- payments ----------------------------------------------------------
     stripe_secret_key: str | None = None
@@ -106,6 +117,8 @@ class Settings(BaseSettings):
             self.twilio_account_sid and self.twilio_auth_token
         ):
             raise ValueError("telephony_provider=twilio requires Twilio SID + auth token")
+        if self.llm_max_keepalive_connections > self.llm_max_connections:
+            raise ValueError("llm_max_keepalive_connections cannot exceed llm_max_connections")
         return self
 
     @property
