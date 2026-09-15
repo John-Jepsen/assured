@@ -61,7 +61,8 @@ capability. ~6.8k lines of Python.
 
 Deep dives: [`agent-system`](docs/agent-system.md) · [`security`](docs/security.md) ·
 [`rag`](docs/rag.md) · [`voice-pipeline`](docs/voice-pipeline.md) ·
-[`evaluation`](docs/evaluation.md) · ADRs in [`docs/architecture-decisions/`](docs/architecture-decisions/).
+[`evaluation`](docs/evaluation.md) · [`production deployment plan`](docs/production-deployment-plan.md) ·
+ADRs in [`docs/architecture-decisions/`](docs/architecture-decisions/).
 
 ---
 

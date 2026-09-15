@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Production deployment plan.** Added a prioritized roadmap for authentication,
+  durable sessions, Hugging Face model serving, pgvector retrieval, hardened containers,
+  observability, release safety, and real-customer launch gates.
+
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request
   asks to confirm and remembers the pending charge on the session; a plain "yes" on
