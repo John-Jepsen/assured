@@ -26,11 +26,9 @@ import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from insurance_ai.agents.specialists import SPECIALISTS
 from insurance_ai.api.schemas import MAX_CHAT_MESSAGE_CHARS, MAX_CONVERSATION_ID_CHARS
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory
-from insurance_ai.domain.enums import AgentName
 from insurance_ai.observability import get_logger
 from insurance_ai.providers.factory import get_providers
 
@@ -63,49 +61,52 @@ async def _run_response(
         await ws.send_json({"type": "done", "answer": "", "sources": []})
         return
 
-    # Orchestrate
+    # Orchestrate, stream, then persist exactly what the caller received.
     async with SessionFactory() as db:
-        result, _sess, conv = await _service.handle_message(
+        turn = await _service.prepare_message(
             db, conversation_id, transcript, channel="web", request_id=str(uuid.uuid4())
         )
-    agent = SPECIALISTS.get(AgentName(result.trace.agents[0])) if result.trace.agents else None
-    sys_prompt = agent.system_prompt if agent else ""
+        result = turn.result
+        conv = turn.conversation
 
-    # Stream LLM tokens -> feed incremental TTS
-    first_token_at = {"t": None}
-    first_audio_at = {"t": None}
+        # Stream LLM tokens -> feed incremental TTS
+        first_token_at = {"t": None}
+        first_audio_at = {"t": None}
+        rendered: list[str] = []
 
-    async def token_stream():
-        async for token in _service.orchestrator.stream_answer(
-            result.answer, transcript, sys_prompt
-        ):
-            if first_token_at["t"] is None:
-                first_token_at["t"] = time.perf_counter()
-                metrics["transcript_to_first_token_ms"] = (
-                    first_token_at["t"] - (t_end + metrics["speech_end_to_transcript_ms"] / 1000)
-                ) * 1000
-            await ws.send_json({"type": "token", "token": token})
-            yield token
+        async def token_stream():
+            async for token in _service.orchestrator.stream_result(result, transcript):
+                rendered.append(token)
+                if first_token_at["t"] is None:
+                    first_token_at["t"] = time.perf_counter()
+                    metrics["transcript_to_first_token_ms"] = (
+                        first_token_at["t"]
+                        - (t_end + metrics["speech_end_to_transcript_ms"] / 1000)
+                    ) * 1000
+                await ws.send_json({"type": "token", "token": token})
+                yield token
 
-    async for chunk in providers.tts.stream_synthesize(token_stream()):
-        if not chunk.data and chunk.is_final:
-            continue
-        if first_audio_at["t"] is None and chunk.data:
-            first_audio_at["t"] = time.perf_counter()
-            metrics["speech_end_to_first_audio_ms"] = (first_audio_at["t"] - t_end) * 1000
-            if first_token_at["t"]:
-                metrics["first_token_to_first_audio_ms"] = (
-                    first_audio_at["t"] - first_token_at["t"]
-                ) * 1000
-        if chunk.data:
-            await ws.send_json(
-                {
-                    "type": "audio",
-                    "data": base64.b64encode(chunk.data).decode(),
-                    "text": chunk.text,
-                    "sample_rate": chunk.sample_rate,
-                }
-            )
+        async for chunk in providers.tts.stream_synthesize(token_stream()):
+            if not chunk.data and chunk.is_final:
+                continue
+            if first_audio_at["t"] is None and chunk.data:
+                first_audio_at["t"] = time.perf_counter()
+                metrics["speech_end_to_first_audio_ms"] = (first_audio_at["t"] - t_end) * 1000
+                if first_token_at["t"]:
+                    metrics["first_token_to_first_audio_ms"] = (
+                        first_audio_at["t"] - first_token_at["t"]
+                    ) * 1000
+            if chunk.data:
+                await ws.send_json(
+                    {
+                        "type": "audio",
+                        "data": base64.b64encode(chunk.data).decode(),
+                        "text": chunk.text,
+                        "sample_rate": chunk.sample_rate,
+                    }
+                )
+
+        result, _sess, conv = await _service.finish_message(db, turn, "".join(rendered))
 
     await ws.send_json({"type": "metrics", **{k: round(v, 1) for k, v in metrics.items()}})
     await ws.send_json(

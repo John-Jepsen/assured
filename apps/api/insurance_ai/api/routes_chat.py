@@ -8,11 +8,9 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from insurance_ai.agents.specialists import SPECIALISTS
 from insurance_ai.api.schemas import ChatRequest, ChatResponse, ChatSocketRequest, VerifyRequest
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory, get_session
-from insurance_ai.domain.enums import AgentName
 from insurance_ai.observability import get_logger
 from insurance_ai.security.session import get_session_store
 from insurance_ai.security.verification import VerificationClaim, verify_identity
@@ -87,9 +85,11 @@ async def ws_chat(ws: WebSocket) -> None:
             message = request.message
             conversation_id = request.conversation_id
             async with SessionFactory() as db:
-                result, _sess, conv = await _service.handle_message(
+                turn = await _service.prepare_message(
                     db, conversation_id, message, request_id=str(uuid.uuid4())
                 )
+                result = turn.result
+                conv = turn.conversation
                 await ws.send_json(
                     {
                         "type": "meta",
@@ -98,16 +98,13 @@ async def ws_chat(ws: WebSocket) -> None:
                         "needs_verification": result.needs_verification,
                     }
                 )
-                agent = (
-                    SPECIALISTS.get(AgentName(result.trace.agents[0]))
-                    if result.trace.agents
-                    else None
-                )
-                sys_prompt = agent.system_prompt if agent else ""
-                async for token in _service.orchestrator.stream_answer(
-                    result.answer, message, sys_prompt
-                ):
+                rendered: list[str] = []
+                async for token in _service.orchestrator.stream_result(result, message):
+                    rendered.append(token)
                     await ws.send_json({"type": "token", "token": token})
+                result, _sess, conv = await _service.finish_message(
+                    db, turn, "".join(rendered)
+                )
                 await ws.send_json(
                     {"type": "done", "answer": result.answer, "sources": result.trace.sources}
                 )

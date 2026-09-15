@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 
+import pytest
+
 
 def test_health(api_client):
     r = api_client.get("/health")
@@ -83,6 +85,7 @@ def test_ws_chat_streams_tokens(api_client):
                 tokens.append(msg["token"])
             elif msg["type"] == "done":
                 assert "rental" in msg["answer"].lower()
+                assert "".join(tokens).strip() == msg["answer"].strip()
                 break
         assert len(tokens) > 3
 
@@ -131,3 +134,38 @@ def test_payments_config_is_test_mode(api_client):
 def test_telephony_status_gracefully_disabled(api_client):
     st = api_client.get("/api/telephony/status").json()
     assert st["enabled"] is False  # no creds in test → web still works
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_turn_persists_model_rendered_answer(db):
+    from collections.abc import AsyncIterator
+
+    from insurance_ai.agents.orchestrator import Orchestrator
+    from insurance_ai.api.service import ConversationService
+    from insurance_ai.config import Settings
+    from insurance_ai.providers.base import ChatMessage, LLMProvider
+    from insurance_ai.providers.factory import Providers
+
+    class RewritingLLM(LLMProvider):
+        name = "test-rewriter"
+
+        async def complete(self, messages: list[ChatMessage], **kwargs) -> str:
+            return "".join([token async for token in self.stream(messages, **kwargs)])
+
+        async def stream(
+            self, messages: list[ChatMessage], **kwargs
+        ) -> AsyncIterator[str]:
+            yield "Model-rendered "
+            yield "answer."
+
+    providers = Providers(Settings())
+    providers.llm = RewritingLLM()
+    service = ConversationService(Orchestrator(providers=providers))
+
+    result, _session, conversation = await service.handle_message(
+        db, None, "Does auto insurance cover a rental car?"
+    )
+    transcript = await service.transcript(db, conversation.id)
+
+    assert result.answer == "Model-rendered answer."
+    assert transcript[-1]["content"] == result.answer

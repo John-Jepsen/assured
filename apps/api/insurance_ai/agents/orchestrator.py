@@ -224,7 +224,7 @@ class Orchestrator:
         self, draft: str, message: str, system_prompt: str
     ) -> AsyncIterator[str]:
         """Stream the grounded draft (mock) or LLM-phrased version (real provider)."""
-        if self.settings.llm_provider == "mock":
+        if self.providers.llm.name == "mock":
             msgs = [ChatMessage(role="system", content="GROUNDED_ANSWER:" + draft)]
         else:
             msgs = [
@@ -238,6 +238,27 @@ class Orchestrator:
             ]
         async for token in self.providers.llm.stream(msgs):
             yield token
+
+    def system_prompt_for(self, result: OrchestratorResult) -> str:
+        """Return the selected specialist prompt used to phrase a grounded draft."""
+        if not result.trace.agents:
+            return ""
+        agent = SPECIALISTS.get(AgentName(result.trace.agents[0]))
+        return agent.system_prompt if agent else ""
+
+    async def stream_result(
+        self, result: OrchestratorResult, message: str
+    ) -> AsyncIterator[str]:
+        """Phrase and stream a planned result through the configured LLM provider."""
+        async for token in self.stream_answer(
+            result.answer, message, self.system_prompt_for(result)
+        ):
+            yield token
+
+    async def complete_result(self, result: OrchestratorResult, message: str) -> str:
+        """Return the same phrased answer used by streaming channels."""
+        answer = "".join([token async for token in self.stream_result(result, message)]).strip()
+        return answer or result.answer
 
 
 def _source_dict(s: Source) -> dict[str, Any]:

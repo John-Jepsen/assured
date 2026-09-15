@@ -30,6 +30,15 @@ class TurnResult:
     needs_verification: bool
 
 
+@dataclass
+class PreparedTurn:
+    """A planned turn whose final user-visible answer has not yet been persisted."""
+
+    result: OrchestratorResult
+    session: Session
+    conversation: Conversation
+
+
 class ConversationService:
     def __init__(self, orchestrator: Orchestrator | None = None) -> None:
         self.orchestrator = orchestrator or Orchestrator()
@@ -59,7 +68,7 @@ class ConversationService:
             sess.customer_id = conv.customer_id
         return sess
 
-    async def handle_message(
+    async def prepare_message(
         self,
         db: AsyncSession,
         conversation_id: str | None,
@@ -67,7 +76,7 @@ class ConversationService:
         *,
         channel: str = "web",
         request_id: str = "req",
-    ) -> tuple[OrchestratorResult, Session, Conversation]:
+    ) -> PreparedTurn:
         conv = await self.get_or_create_conversation(db, conversation_id, channel=channel)
         sess = self._sync_session(conv)
 
@@ -97,18 +106,47 @@ class ConversationService:
         conv.current_agent = result.trace.agents[0] if result.trace.agents else "orchestrator"
         conv.escalated = sess.escalated or conv.escalated
         conv.customer_id = sess.customer_id or conv.customer_id
+        await db.commit()
+        return PreparedTurn(result=result, session=sess, conversation=conv)
+
+    async def finish_message(
+        self, db: AsyncSession, turn: PreparedTurn, answer: str
+    ) -> tuple[OrchestratorResult, Session, Conversation]:
+        """Persist exactly the answer returned or streamed to the user."""
+        final_answer = answer.strip() or turn.result.answer
+        turn.result.answer = final_answer
         db.add(
             Message(
-                conversation_id=conv.id,
+                conversation_id=turn.conversation.id,
                 role=MessageRole.ASSISTANT,
-                content=result.answer,
-                agent=conv.current_agent,
-                intent=",".join(result.trace.intents),
-                trace=result.trace.as_dict(),
+                content=final_answer,
+                agent=turn.conversation.current_agent,
+                intent=",".join(turn.result.trace.intents),
+                trace=turn.result.trace.as_dict(),
             )
         )
         await db.commit()
-        return result, sess, conv
+        return turn.result, turn.session, turn.conversation
+
+    async def handle_message(
+        self,
+        db: AsyncSession,
+        conversation_id: str | None,
+        message: str,
+        *,
+        channel: str = "web",
+        request_id: str = "req",
+    ) -> tuple[OrchestratorResult, Session, Conversation]:
+        """Plan, phrase, and persist a non-streaming turn."""
+        turn = await self.prepare_message(
+            db,
+            conversation_id,
+            message,
+            channel=channel,
+            request_id=request_id,
+        )
+        answer = await self.orchestrator.complete_result(turn.result, message)
+        return await self.finish_message(db, turn, answer)
 
     async def transcript(self, db: AsyncSession, conversation_id: str) -> list[dict[str, Any]]:
         rows = await db.execute(
