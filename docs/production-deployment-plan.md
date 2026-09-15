@@ -53,10 +53,11 @@ As of the review date:
 - The frontend TypeScript/Vite production build succeeds.
 - The standard API image intentionally does not contain `torch` or `transformers`; the
   `huggingface` provider uses a dedicated OpenAI-compatible model endpoint.
-- The API and web images run as root.
-- No `.dockerignore` exists, so unnecessary local content is sent to the Docker builder.
-- CI exercises mock providers but does not build, scan, or test the production model
-  path.
+- The API and web images run as non-root with read-only filesystems, dropped Linux
+  capabilities, and `no-new-privileges` in the Compose baseline.
+- A root `.dockerignore` reduces the integrated build contexts to less than 200 KB.
+- CI exercises mock providers, native pgvector, and hardened runtime image builds. Image
+  vulnerability scanning, signing, and a live production-model evaluation remain open.
 
 The highest-risk implementation gaps are:
 
@@ -71,7 +72,7 @@ The highest-risk implementation gaps are:
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
 | Startup | Every API replica runs migrations and knowledge ingestion | Deployments can race and model-backed ingestion delays every replica startup |
 | Readiness | `/ready` checks only PostgreSQL and returns HTTP 200 when not ready | An orchestrator can route traffic to a nonfunctional instance |
-| Supply chain | Broad dependency ranges, mutable image tags, and no image scan/sign step | Builds are not reproducible and dependency changes can reach production unreviewed |
+| Supply chain | Runtime image checks exist, but dependencies/tags remain broad and images are not scanned or signed | Builds are not fully reproducible and dependency changes can reach production unreviewed |
 
 ## Target architecture
 

@@ -1,0 +1,53 @@
+# Version-control and automation metadata
+.git
+.github
+
+# Local configuration and secrets
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.crt
+
+# Python environments, bytecode, and tool caches
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+**/.coverage.*
+**/htmlcov
+
+# Frontend dependencies and build output
+**/node_modules
+**/dist
+**/.vite
+
+# Local data and generated artifacts
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/*.log
+models
+**/.hf_home
+**/*.onnx
+**/*.gguf
+**/*.safetensors
+**/*.bin
+
+# Files that are not required by either runtime image
+.DS_Store
+.idea
+.vscode
+docs
+tests
+evals
+CLAUDE.md
+CHANGELOG.md
+LICENSE
+Makefile
+README.md

@@ -1,38 +1,64 @@
 # Insurance AI — API / agent / speech / telephony backend (single async service).
-FROM python:3.12-slim AS base
+FROM python:3.12-slim AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /build/apps/api
+
+# Build a wheelhouse so the runtime stage never needs compilers, package metadata,
+# editable source installs, or access to a package index.
+COPY apps/api/pyproject.toml ./pyproject.toml
+COPY apps/api/insurance_ai ./insurance_ai
+
+ARG INSTALL_SPEECH=false
+RUN case "${INSTALL_SPEECH}" in \
+        true) extras=".[runtime,speech,stripe,telephony]" ;; \
+        false) extras=".[runtime]" ;; \
+        *) echo "INSTALL_SPEECH must be 'true' or 'false'" >&2; exit 2 ;; \
+    esac && \
+    python -m pip wheel --wheel-dir /wheels "${extras}"
+
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     HF_HOME=/models/hf \
-    PIPER_VOICE_DIR=/models/piper
+    PIPER_VOICE_DIR=/models/piper \
+    XDG_CACHE_HOME=/models/cache
 
-WORKDIR /app
-
-# System deps: curl for healthcheck; libsndfile for soundfile (speech extra).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl libsndfile1 && rm -rf /var/lib/apt/lists/*
-
-# Install Python deps first for layer caching. Speech/ML extras are OPTIONAL and are
-# controlled by build arg INSTALL_SPEECH (off by default → small, fast image).
-COPY apps/api/pyproject.toml /app/apps/api/pyproject.toml
+# curl supports the image healthcheck; libsndfile is installed only when speech
+# support is baked in.
 ARG INSTALL_SPEECH=false
-RUN pip install --upgrade pip && \
-    cd /app/apps/api && \
-    if [ "$INSTALL_SPEECH" = "true" ]; then pip install ".[dev,speech,stripe,telephony]"; \
-    else pip install ".[dev]"; fi || true
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && if [ "${INSTALL_SPEECH}" = "true" ]; then \
+        apt-get install -y --no-install-recommends libsndfile1; \
+    fi \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 assured \
+    && useradd --uid 10001 --gid assured --create-home --home-dir /home/assured assured \
+    && install -d -o assured -g assured /models/hf /models/piper /models/cache
 
-# App source + knowledge base.
-COPY apps/api /app/apps/api
-COPY knowledge /app/knowledge
-COPY evals /app/evals
+COPY --from=builder /wheels /wheels
+RUN python -m pip install --no-index --no-cache-dir /wheels/*.whl \
+    && rm -rf /wheels
 
-# Reinstall now that the package source is present (editable for tooling).
-RUN cd /app/apps/api && pip install -e ".[dev]"
-
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
+# Alembic and the bootstrap command intentionally remain available for the local
+# entrypoint. Application code itself is installed from the non-editable wheel.
 WORKDIR /app/apps/api
+COPY apps/api/alembic.ini ./alembic.ini
+COPY apps/api/migrations ./migrations
+COPY apps/api/scripts ./scripts
+COPY knowledge /app/knowledge
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod 0555 /entrypoint.sh \
+    && chmod -R a-w /app
+
+USER 10001:10001
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \

@@ -14,6 +14,9 @@ All notable changes to this project are documented here.
 - **Native pgvector retrieval.** Added validated vector mirrors, database-side filtered
   cosine top-k search, a dimension-aware HNSW migration, portable fallback behavior,
   and an opt-in real-Postgres integration test.
+- **Hardened runtime containers.** API and web images now run as non-root with read-only
+  filesystems, dropped capabilities, minimal runtime dependencies, strict builds, small
+  Docker contexts, and CI runtime-security checks.
 
 ### Fixed
 - **Payments — confirm-before-charge now completes across turns.** A payment request

@@ -24,6 +24,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Operational dependency used by the container entrypoint to apply migrations.
+# Kept separate from development tooling so production images do not contain
+# pytest, ruff, or their command-line entry points.
+runtime = ["alembic>=1.13"]
 # Real model adapters — installed per hardware profile, not required for the
 # deterministic core / tests.
 speech = [
@@ -39,7 +43,13 @@ otel = [
     "opentelemetry-exporter-otlp-proto-http>=1.25",
     "opentelemetry-instrumentation-fastapi>=0.46b0",
 ]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.5", "pyyaml>=6.0", "alembic>=1.13"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "pyyaml>=6.0",
+    "alembic>=1.13",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -41,6 +41,15 @@ services:
     volumes:
       # Persistent model cache — models download once, survive restarts.
       - modelcache:/models
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
     ports:
       - "${API_PORT:-8000}:8000"
 
@@ -51,8 +60,17 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - "${WEB_PORT:-8080}:8080"
 
 volumes:
   pgdata:
