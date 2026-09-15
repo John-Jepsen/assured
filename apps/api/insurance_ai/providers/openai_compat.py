@@ -18,6 +18,12 @@ from typing import Any
 import httpx
 
 from insurance_ai.config import Settings
+from insurance_ai.observability.metrics import (
+    MODEL_QUEUE_REJECTIONS,
+    MODEL_REQUESTS_ACTIVE,
+    PROVIDER_REQUEST_DURATION,
+    PROVIDER_REQUESTS,
+)
 from insurance_ai.providers.base import ChatMessage, EmbeddingProvider, LLMMetadata, LLMProvider
 
 _RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
@@ -123,7 +129,13 @@ class OpenAICompatLLM(LLMProvider):
 
     async def ready(self) -> bool:
         """Check the OpenAI-compatible model catalog without changing breaker state."""
+        started = time.perf_counter()
+        outcome = "error"
         if self._circuit_open_until > self._clock():
+            PROVIDER_REQUESTS.inc(self.name, "ready", "circuit_open")
+            PROVIDER_REQUEST_DURATION.observe(
+                time.perf_counter() - started, self.name, "ready"
+            )
             return False
         try:
             response = await self._client.get(
@@ -133,17 +145,25 @@ class OpenAICompatLLM(LLMProvider):
             response.raise_for_status()
             payload = response.json()
             models = payload.get("data", [])
-            return isinstance(models, list) and any(
+            ready = isinstance(models, list) and any(
                 isinstance(model, dict) and model.get("id") == self.model for model in models
             )
+            outcome = "success" if ready else "not_ready"
+            return ready
         except (httpx.HTTPError, TypeError, ValueError):
             return False
+        finally:
+            PROVIDER_REQUESTS.inc(self.name, "ready", outcome)
+            PROVIDER_REQUEST_DURATION.observe(
+                time.perf_counter() - started, self.name, "ready"
+            )
 
     @asynccontextmanager
     async def _admission(self):
         limit = self.settings.llm_max_concurrency + self.settings.llm_max_pending_requests
         async with self._admission_lock:
             if self._admitted >= limit:
+                MODEL_QUEUE_REJECTIONS.inc(self.name, "queue_full")
                 raise ModelOverloadedError("model request queue is full")
             self._admitted += 1
         acquired = False
@@ -155,10 +175,13 @@ class OpenAICompatLLM(LLMProvider):
                 )
                 acquired = True
             except TimeoutError as exc:
+                MODEL_QUEUE_REJECTIONS.inc(self.name, "queue_timeout")
                 raise ModelOverloadedError("model request queue timed out") from exc
+            MODEL_REQUESTS_ACTIVE.inc(self.name)
             yield
         finally:
             if acquired:
+                MODEL_REQUESTS_ACTIVE.dec(self.name)
                 self._concurrency.release()
             async with self._admission_lock:
                 self._admitted -= 1
@@ -168,9 +191,11 @@ class OpenAICompatLLM(LLMProvider):
         async with self._circuit_lock:
             now = self._clock()
             if self._circuit_open_until > now:
+                MODEL_QUEUE_REJECTIONS.inc(self.name, "circuit_open")
                 raise ModelCircuitOpenError("model circuit breaker is open")
             if self._circuit_open_until:
                 if self._circuit_probe_in_flight:
+                    MODEL_QUEUE_REJECTIONS.inc(self.name, "recovery_probe_in_flight")
                     raise ModelCircuitOpenError("model circuit recovery probe is in flight")
                 self._circuit_probe_in_flight = True
                 return True
@@ -219,70 +244,97 @@ class OpenAICompatLLM(LLMProvider):
 
     async def complete(self, messages: list[ChatMessage], **kwargs) -> str:
         payload = self._payload(messages, kwargs)
-        async with self._admission():
-            recovery_probe = await self._before_model_request()
-            try:
-                result = await self._complete_request(payload)
-            except asyncio.CancelledError:
-                if recovery_probe:
-                    await self._record_failure(recovery_probe=True)
-                raise
-            except Exception:
-                await self._record_failure(recovery_probe)
-                raise
-            await self._record_success()
-            return result
+        started = time.perf_counter()
+        outcome = "error"
+        try:
+            async with self._admission():
+                recovery_probe = await self._before_model_request()
+                try:
+                    result = await self._complete_request(payload)
+                except asyncio.CancelledError:
+                    outcome = "cancelled"
+                    if recovery_probe:
+                        await self._record_failure(recovery_probe=True)
+                    raise
+                except Exception:
+                    await self._record_failure(recovery_probe)
+                    raise
+                await self._record_success()
+                outcome = "success"
+                return result
+        except (ModelOverloadedError, ModelCircuitOpenError):
+            outcome = "rejected"
+            raise
+        finally:
+            PROVIDER_REQUESTS.inc(self.name, "complete", outcome)
+            PROVIDER_REQUEST_DURATION.observe(
+                time.perf_counter() - started, self.name, "complete"
+            )
 
     async def stream(self, messages: list[ChatMessage], **kwargs) -> AsyncIterator[str]:
         payload = {**self._payload(messages, kwargs), "stream": True}
-        async with self._admission():
-            recovery_probe = await self._before_model_request()
-            try:
-                for attempt in range(self.settings.llm_max_retries + 1):
-                    emitted = False
-                    try:
-                        async with self._client.stream(
-                            "POST",
-                            f"{self.base_url}/chat/completions",
-                            json=payload,
-                            headers=self._headers(),
-                        ) as response:
-                            if self._can_retry_status(response, attempt):
-                                await self._backoff(attempt)
-                                continue
-                            response.raise_for_status()
-                            async for line in response.aiter_lines():
-                                if not line.startswith("data:"):
+        started = time.perf_counter()
+        outcome = "error"
+        try:
+            async with self._admission():
+                recovery_probe = await self._before_model_request()
+                try:
+                    for attempt in range(self.settings.llm_max_retries + 1):
+                        emitted = False
+                        try:
+                            async with self._client.stream(
+                                "POST",
+                                f"{self.base_url}/chat/completions",
+                                json=payload,
+                                headers=self._headers(),
+                            ) as response:
+                                if self._can_retry_status(response, attempt):
+                                    await self._backoff(attempt)
                                     continue
-                                data = line[5:].strip()
-                                if data == "[DONE]":
-                                    await self._record_success()
-                                    return
-                                try:
-                                    delta = json.loads(data)["choices"][0]["delta"].get(
-                                        "content"
-                                    )
-                                except (KeyError, IndexError, TypeError, ValueError):
-                                    continue
-                                if delta:
-                                    emitted = True
-                                    yield delta
-                            await self._record_success()
-                            return
-                    except httpx.TransportError:
-                        if emitted or attempt >= self.settings.llm_max_retries:
-                            raise
-                        await self._backoff(attempt)
-            except asyncio.CancelledError:
-                if recovery_probe:
-                    await self._record_failure(recovery_probe=True)
-                raise
-            except Exception:
-                await self._record_failure(recovery_probe)
-                raise
-            finally:
-                if recovery_probe:
-                    await self._release_recovery_probe()
+                                response.raise_for_status()
+                                async for line in response.aiter_lines():
+                                    if not line.startswith("data:"):
+                                        continue
+                                    data = line[5:].strip()
+                                    if data == "[DONE]":
+                                        await self._record_success()
+                                        outcome = "success"
+                                        return
+                                    try:
+                                        delta = json.loads(data)["choices"][0]["delta"].get(
+                                            "content"
+                                        )
+                                    except (KeyError, IndexError, TypeError, ValueError):
+                                        continue
+                                    if delta:
+                                        emitted = True
+                                        yield delta
+                                await self._record_success()
+                                outcome = "success"
+                                return
+                        except httpx.TransportError:
+                            if emitted or attempt >= self.settings.llm_max_retries:
+                                raise
+                            await self._backoff(attempt)
+                except asyncio.CancelledError:
+                    outcome = "cancelled"
+                    if recovery_probe:
+                        await self._record_failure(recovery_probe=True)
+                    raise
+                except Exception:
+                    await self._record_failure(recovery_probe)
+                    raise
+                finally:
+                    if recovery_probe:
+                        await self._release_recovery_probe()
+        except (ModelOverloadedError, ModelCircuitOpenError):
+            outcome = "rejected"
+            raise
+        finally:
+            PROVIDER_REQUESTS.inc(self.name, "stream", outcome)
+            PROVIDER_REQUEST_DURATION.observe(
+                time.perf_counter() - started, self.name, "stream"
+            )
 
 
 class OpenAIEmbedding(EmbeddingProvider):

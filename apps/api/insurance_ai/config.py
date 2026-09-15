@@ -11,7 +11,7 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 HardwareProfile = Literal["local-cpu", "apple-silicon", "nvidia", "cloud-gpu"]
@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     # http://localhost:4318). Off by default; requires the `otel` extra.
     otel_enabled: bool = False
     otel_service_name: str = "insurance-ai-api"
+    metrics_enabled: bool = False
+    metrics_token: SecretStr | None = None
 
     # --- database ----------------------------------------------------------
     # Async SQLAlchemy URL. Default points at the compose Postgres service.
@@ -131,6 +133,16 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=3600, gt=0)
     session_lock_timeout_seconds: int = Field(default=180, gt=0)
     session_lock_blocking_timeout_seconds: int = Field(default=10, gt=0)
+    rate_limit_enabled: bool = True
+    rate_limit_fail_open: bool = False
+    rate_limit_window_seconds: int = Field(default=60, gt=0, le=3600)
+    rate_limit_http_ip_requests: int = Field(default=300, gt=0)
+    rate_limit_http_principal_requests: int = Field(default=60, gt=0)
+    rate_limit_websocket_ip_connections: int = Field(default=30, gt=0)
+    rate_limit_websocket_principal_connections: int = Field(default=10, gt=0)
+    rate_limit_websocket_ip_actions: int = Field(default=120, gt=0)
+    rate_limit_websocket_principal_actions: int = Field(default=30, gt=0)
+    rate_limit_memory_max_buckets: int = Field(default=10_000, gt=0)
 
     @field_validator("allowed_origins")
     @classmethod
@@ -173,6 +185,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "authentication_mode=oidc requires issuer, audience, and JWKS URL"
             )
+        if self.metrics_enabled and not self.metrics_token:
+            raise ValueError("metrics_enabled requires INSURANCE_AI_METRICS_TOKEN")
         if self.llm_provider == "huggingface" and self.environment == "prod":
             if not self.huggingface_token:
                 raise ValueError("production Hugging Face serving requires a model-service token")
@@ -216,6 +230,10 @@ class Settings(BaseSettings):
                 unsafe.append("OIDC issuer and JWKS URL must use HTTPS")
             if not self.oidc_admin_roles:
                 unsafe.append("no administrative OIDC roles are configured")
+            if not self.rate_limit_enabled:
+                unsafe.append("rate limiting is disabled")
+            if self.rate_limit_fail_open:
+                unsafe.append("rate limiting is configured to fail open")
 
             redis = urlsplit(self.redis_url or "")
             if self.session_backend == "redis" and redis.scheme not in {"redis", "rediss"}:

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import uuid
-
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,8 +10,15 @@ from insurance_ai.api.schemas import ChatRequest, ChatResponse, ChatSocketReques
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory, get_session
 from insurance_ai.observability import get_logger
-from insurance_ai.security.identity import Principal, customer_principal, websocket_principal
+from insurance_ai.observability.middleware import request_id_from_scope
+from insurance_ai.security.identity import Principal, websocket_principal
 from insurance_ai.security.origin import websocket_origin_allowed
+from insurance_ai.security.rate_limit import (
+    rate_limited_customer_principal,
+    websocket_action_allowed,
+    websocket_ip_connection_allowed,
+    websocket_principal_connection_allowed,
+)
 from insurance_ai.security.session import get_session_store
 from insurance_ai.security.verification import VerificationClaim, verify_identity
 
@@ -25,8 +30,9 @@ _service = ConversationService()
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     req: ChatRequest,
+    request: Request,
     db: AsyncSession = Depends(get_session),
-    principal: Principal = Depends(customer_principal),
+    principal: Principal = Depends(rate_limited_customer_principal),
 ) -> ChatResponse:
     result, _sess, conv = await _service.handle_message(
         db,
@@ -34,7 +40,7 @@ async def chat(
         req.message,
         principal=principal,
         channel=req.channel,
-        request_id=str(uuid.uuid4()),
+        request_id=request_id_from_scope(request.scope),
     )
     return ChatResponse(
         conversation_id=conv.id,
@@ -48,7 +54,7 @@ async def chat(
 async def verify(
     req: VerifyRequest,
     db: AsyncSession = Depends(get_session),
-    principal: Principal = Depends(customer_principal),
+    principal: Principal = Depends(rate_limited_customer_principal),
 ) -> dict:
     """Deterministic verification endpoint (never routed through the LLM)."""
     conv = await _service.require_conversation(db, req.conversation_id, principal)
@@ -87,10 +93,16 @@ async def ws_chat(ws: WebSocket) -> None:
     if not websocket_origin_allowed(ws.headers.get("origin")):
         await ws.close(code=1008, reason="Origin not allowed")
         return
+    if not await websocket_ip_connection_allowed(ws):
+        await ws.close(code=1013, reason="Rate limit exceeded")
+        return
     try:
         principal = await websocket_principal(ws)
     except HTTPException:
         await ws.close(code=1008, reason="Authentication required")
+        return
+    if not await websocket_principal_connection_allowed(principal):
+        await ws.close(code=1013, reason="Rate limit exceeded")
         return
     await ws.accept()
     try:
@@ -98,6 +110,9 @@ async def ws_chat(ws: WebSocket) -> None:
             payload = await ws.receive_json()
             if principal.is_expired():
                 await ws.close(code=1008, reason="Access token expired")
+                break
+            if not await websocket_action_allowed(ws, principal):
+                await ws.close(code=1013, reason="Rate limit exceeded")
                 break
             try:
                 request = ChatSocketRequest.model_validate(payload)
@@ -118,7 +133,7 @@ async def ws_chat(ws: WebSocket) -> None:
                     conversation_id,
                     message,
                     principal=principal,
-                    request_id=str(uuid.uuid4()),
+                    request_id=request_id_from_scope(ws.scope),
                 )
                 result = turn.result
                 conv = turn.conversation

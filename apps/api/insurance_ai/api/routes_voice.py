@@ -33,6 +33,11 @@ from insurance_ai.observability import get_logger
 from insurance_ai.providers.factory import get_providers
 from insurance_ai.security.identity import Principal, websocket_principal
 from insurance_ai.security.origin import websocket_origin_allowed
+from insurance_ai.security.rate_limit import (
+    websocket_action_allowed,
+    websocket_ip_connection_allowed,
+    websocket_principal_connection_allowed,
+)
 
 router = APIRouter(tags=["voice"])
 log = get_logger("voice")
@@ -133,10 +138,16 @@ async def ws_voice(ws: WebSocket) -> None:
     if not websocket_origin_allowed(ws.headers.get("origin")):
         await ws.close(code=1008, reason="Origin not allowed")
         return
+    if not await websocket_ip_connection_allowed(ws):
+        await ws.close(code=1013, reason="Rate limit exceeded")
+        return
     try:
         principal = await websocket_principal(ws)
     except HTTPException:
         await ws.close(code=1008, reason="Authentication required")
+        return
+    if not await websocket_principal_connection_allowed(principal):
+        await ws.close(code=1013, reason="Rate limit exceeded")
         return
     await ws.accept()
     buffer = bytearray()
@@ -171,6 +182,9 @@ async def ws_voice(ws: WebSocket) -> None:
                     await ws.send_json({"type": "interrupted"})
                 buffer.clear()
             elif mtype in ("end", "utterance_text"):
+                if not await websocket_action_allowed(ws, principal):
+                    await ws.close(code=1013, reason="Rate limit exceeded")
+                    break
                 supplied_conversation_id = msg.get("conversation_id")
                 if supplied_conversation_id is not None and (
                     not isinstance(supplied_conversation_id, str)

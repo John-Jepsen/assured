@@ -11,8 +11,10 @@ from fastapi.responses import JSONResponse
 from insurance_ai import __version__
 from insurance_ai.config import get_settings
 from insurance_ai.observability import configure_logging, get_logger, setup_tracing
+from insurance_ai.observability.middleware import ObservabilityMiddleware
 from insurance_ai.providers.factory import get_providers
 from insurance_ai.security.identity import get_authenticator
+from insurance_ai.security.rate_limit import get_rate_limiter, http_ip_limit
 from insurance_ai.security.session import get_session_store
 from insurance_ai.tools.registry import load_all_tools
 
@@ -43,6 +45,9 @@ async def lifespan(app: FastAPI):
         if get_session_store.cache_info().currsize:
             await get_session_store().aclose()
             get_session_store.cache_clear()
+        if get_rate_limiter.cache_info().currsize:
+            await get_rate_limiter().aclose()
+            get_rate_limiter.cache_clear()
         get_authenticator.cache_clear()
 
 
@@ -61,16 +66,33 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def _rate_limit_http(request, call_next):
+        # Health probes and browser preflights must remain available during an
+        # incident; every application HTTP endpoint is bounded by source IP.
+        if request.method != "OPTIONS" and request.url.path.startswith("/api/"):
+            decision = await http_ip_limit(request)
+            if not decision.allowed:
+                return JSONResponse(
+                    status_code=429,
+                    content={"error": "rate_limited", "message": "Too many requests."},
+                    headers={"Retry-After": str(decision.retry_after)},
+                )
+        return await call_next(request)
+    app.add_middleware(ObservabilityMiddleware)
+
     from insurance_ai.api import (
         routes_admin,
         routes_chat,
         routes_health,
+        routes_metrics,
         routes_payments,
         routes_telephony,
         routes_voice,
     )
 
     app.include_router(routes_health.router)
+    app.include_router(routes_metrics.router)
     app.include_router(routes_chat.router)
     app.include_router(routes_voice.router)
     app.include_router(routes_admin.router)

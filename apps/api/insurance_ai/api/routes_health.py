@@ -10,6 +10,7 @@ from insurance_ai.api.schemas import HealthStatus
 from insurance_ai.config import get_settings
 from insurance_ai.db.base import get_engine
 from insurance_ai.providers.factory import get_providers
+from insurance_ai.security.rate_limit import get_rate_limiter
 from insurance_ai.security.session import get_session_store
 
 router = APIRouter(tags=["health"])
@@ -54,6 +55,8 @@ async def ready(response: Response) -> dict:
             await conn.execute(text("SELECT 1"))
         if not await get_session_store().ping():
             raise RuntimeError("session store unavailable")
+        if get_settings().rate_limit_enabled and not await get_rate_limiter().ping():
+            raise RuntimeError("rate-limit store unavailable")
         if not await get_providers().llm.ready():
             raise RuntimeError("model provider unavailable")
         return {"ready": True}
