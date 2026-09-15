@@ -13,7 +13,10 @@ Protocol (JSON control + base64 audio, so it works over a single JSON channel):
            {"type":"interrupted"}                                 (barge-in ack)
 
 Barge-in: a JSON "barge_in" cancels the in-flight response task immediately, so the
-user never waits for the assistant to finish speaking.
+user never waits for the assistant to finish speaking. The cancellation cuts the token
+and TTS stream short, but the turn's persistence runs under
+:func:`insurance_ai.db.cancellation.uninterruptible` so it can never be abandoned with a
+statement in flight -- see that module for what an abandoned connection costs.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from insurance_ai.api.schemas import MAX_CHAT_MESSAGE_CHARS, MAX_CONVERSATION_ID_CHARS
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory
+from insurance_ai.db.cancellation import uninterruptible
 from insurance_ai.observability import get_logger
 from insurance_ai.observability.middleware import request_id_from_scope
 from insurance_ai.providers.factory import get_providers
@@ -76,13 +80,17 @@ async def _run_response(
 
     # Orchestrate, stream, then persist exactly what the caller received.
     async with SessionFactory() as db:
-        turn = await _service.prepare_message(
-            db,
-            conversation_id,
-            transcript,
-            principal=principal,
-            channel="web",
-            request_id=request_id,
+        # Planning writes the user message and runs the state-changing tools; a
+        # barge-in landing here must not tear a half-applied turn out of the database.
+        turn = await uninterruptible(
+            _service.prepare_message(
+                db,
+                conversation_id,
+                transcript,
+                principal=principal,
+                channel="web",
+                request_id=request_id,
+            )
         )
         result = turn.result
         conv = turn.conversation
@@ -124,7 +132,9 @@ async def _run_response(
                     }
                 )
 
-        result, _sess, conv = await _service.finish_message(db, turn, "".join(rendered))
+        result, _sess, conv = await uninterruptible(
+            _service.finish_message(db, turn, "".join(rendered))
+        )
 
     await ws.send_json({"type": "metrics", **{k: round(v, 1) for k, v in metrics.items()}})
     await ws.send_json(
