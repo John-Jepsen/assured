@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, status
 from sqlalchemy import text
 
 from insurance_ai import __version__
@@ -43,11 +43,12 @@ async def health() -> HealthStatus:
 
 
 @router.get("/ready")
-async def ready() -> dict:
-    """Readiness: DB reachable. Returns 503-worthy body the compose healthcheck reads."""
+async def ready(response: Response) -> dict:
+    """Report readiness and use a non-success status when the database is unavailable."""
     try:
         async with get_engine().connect() as conn:
             await conn.execute(text("SELECT 1"))
         return {"ready": True}
     except Exception:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {"ready": False}

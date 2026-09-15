@@ -13,6 +13,32 @@ def test_health(api_client):
     assert body["providers"]["llm"] == "mock"
 
 
+def test_readiness_returns_503_when_database_is_unavailable(api_client, monkeypatch):
+    from insurance_ai.api import routes_health
+
+    class UnavailableEngine:
+        def connect(self):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(routes_health, "get_engine", lambda: UnavailableEngine())
+    response = api_client.get("/ready")
+    assert response.status_code == 503
+    assert response.json() == {"ready": False}
+
+
+def test_chat_rejects_blank_and_oversized_messages(api_client):
+    assert api_client.post("/api/chat", json={"message": "   "}).status_code == 422
+    assert api_client.post("/api/chat", json={"message": "x" * 8_001}).status_code == 422
+
+
+def test_ws_chat_rejects_invalid_message_without_running_turn(api_client):
+    with api_client.websocket_connect("/api/ws/chat") as ws:
+        ws.send_json({"message": ""})
+        response = ws.receive_json()
+        assert response["type"] == "error"
+        assert response["code"] == "invalid_request"
+
+
 def test_chat_then_verify_then_protected(api_client):
     # 1) Unverified policy question → verification required
     r = api_client.post("/api/chat", json={"message": "What's my collision deductible on AUTO-10024?"})

@@ -5,10 +5,11 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from insurance_ai.agents.specialists import SPECIALISTS
-from insurance_ai.api.schemas import ChatRequest, ChatResponse, VerifyRequest
+from insurance_ai.api.schemas import ChatRequest, ChatResponse, ChatSocketRequest, VerifyRequest
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory, get_session
 from insurance_ai.domain.enums import AgentName
@@ -72,8 +73,19 @@ async def ws_chat(ws: WebSocket) -> None:
     try:
         while True:
             payload = await ws.receive_json()
-            message = payload.get("message", "")
-            conversation_id = payload.get("conversation_id")
+            try:
+                request = ChatSocketRequest.model_validate(payload)
+            except ValidationError:
+                await ws.send_json(
+                    {
+                        "type": "error",
+                        "code": "invalid_request",
+                        "message": "The chat message is empty, too large, or malformed.",
+                    }
+                )
+                continue
+            message = request.message
+            conversation_id = request.conversation_id
             async with SessionFactory() as db:
                 result, _sess, conv = await _service.handle_message(
                     db, conversation_id, message, request_id=str(uuid.uuid4())

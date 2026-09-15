@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import time
 import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from insurance_ai.agents.specialists import SPECIALISTS
+from insurance_ai.api.schemas import MAX_CHAT_MESSAGE_CHARS, MAX_CONVERSATION_ID_CHARS
 from insurance_ai.api.service import ConversationService
 from insurance_ai.db.base import SessionFactory
 from insurance_ai.domain.enums import AgentName
@@ -35,6 +37,7 @@ from insurance_ai.providers.factory import get_providers
 router = APIRouter(tags=["voice"])
 log = get_logger("voice")
 _service = ConversationService()
+MAX_AUDIO_BUFFER_BYTES = 10 * 1024 * 1024
 
 
 async def _run_response(
@@ -127,19 +130,58 @@ async def ws_voice(ws: WebSocket) -> None:
             msg = await ws.receive_json()
             mtype = msg.get("type")
             if mtype == "audio":
-                buffer += base64.b64decode(msg.get("data", ""))
+                try:
+                    chunk = base64.b64decode(msg.get("data", ""), validate=True)
+                except (binascii.Error, TypeError, ValueError):
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "code": "invalid_audio",
+                            "message": "The audio frame is not valid base64.",
+                        }
+                    )
+                    continue
+                if len(buffer) + len(chunk) > MAX_AUDIO_BUFFER_BYTES:
+                    await ws.close(code=1009, reason="Audio buffer too large")
+                    break
+                buffer += chunk
             elif mtype == "barge_in":
                 if task and not task.done():
                     task.cancel()
                     await ws.send_json({"type": "interrupted"})
                 buffer.clear()
             elif mtype in ("end", "utterance_text"):
-                conversation_id = msg.get("conversation_id") or conversation_id
+                supplied_conversation_id = msg.get("conversation_id")
+                if supplied_conversation_id is not None and (
+                    not isinstance(supplied_conversation_id, str)
+                    or not 1 <= len(supplied_conversation_id) <= MAX_CONVERSATION_ID_CHARS
+                ):
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "code": "invalid_request",
+                            "message": "The conversation ID is malformed.",
+                        }
+                    )
+                    continue
+                conversation_id = supplied_conversation_id or conversation_id
                 if task and not task.done():
                     task.cancel()
                 audio = bytes(buffer)
                 buffer.clear()
                 pretranscribed = msg.get("text") if mtype == "utterance_text" else None
+                if pretranscribed is not None and (
+                    not isinstance(pretranscribed, str)
+                    or not 1 <= len(pretranscribed.strip()) <= MAX_CHAT_MESSAGE_CHARS
+                ):
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "code": "invalid_request",
+                            "message": "The transcript is empty, too large, or malformed.",
+                        }
+                    )
+                    continue
                 t_end = time.perf_counter()
                 # Run the response as a background task so the receive loop stays free
                 # to process a barge-in (interruption) while the assistant is speaking.
