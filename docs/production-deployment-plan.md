@@ -1,6 +1,6 @@
 # Production Deployment Plan
 
-**Status:** Proposed
+**Status:** Implementation in progress
 
 **Last reviewed:** 2026-09-15
 
@@ -13,8 +13,10 @@ Assured has a good demonstration baseline: the API and web app build as containe
 the test suite covers deterministic agent behavior, and providers are isolated behind
 interfaces. It is not ready to process real customer data. The release blockers are
 application authentication, durable session state, demo-only identity controls,
-production model serving, scalable retrieval, container hardening, and operational
-controls.
+production-scale model and retrieval validation, reproducible image supply-chain
+controls, and operational controls. Remote model serving, native pgvector retrieval,
+bounded channel inputs, consistent answer persistence, and hardened application images
+now provide the implementation foundation for those remaining gates.
 
 The recommended model architecture is a dedicated inference service rather than loading
 Hugging Face `transformers` into each FastAPI worker. The API should call a private,
@@ -68,10 +70,10 @@ The highest-risk implementation gaps are:
 | Session storage | Verification and pending actions are held in process memory | State is lost on restart and differs across workers or replicas |
 | Demo identity | A fixed OTP and a public synthetic customer directory are enabled | Demo controls cannot be allowed in a real environment |
 | LLM runtime | A remote-provider and vLLM foundation exists but is not capacity-tested | Safe concurrency, model quality, and GPU sizing are not yet established |
-| Channel consistency | REST returns the deterministic draft while WebSockets stream an LLM rewrite | The displayed, returned, and persisted answers can differ |
+| Grounding validation | All channels now return and persist the same model-rendered answer, with deterministic fallback on provider failure, but rewritten output is not yet checked fact-by-fact against the grounded draft | A fluent rewrite could introduce an unsupported detail before the planned validator is implemented |
 | Retrieval | Native pgvector top-k and migration exist but are not tuned on a production-sized corpus | Index choice, recall, and capacity still require production-like validation |
 | Startup | Every API replica runs migrations and knowledge ingestion | Deployments can race and model-backed ingestion delays every replica startup |
-| Readiness | `/ready` checks only PostgreSQL and returns HTTP 200 when not ready | An orchestrator can route traffic to a nonfunctional instance |
+| Readiness | `/ready` returns HTTP 503 when PostgreSQL is unavailable, but does not yet cover the session store, model service, or production-configuration validity | An orchestrator can still route traffic to a partially functional instance |
 | Supply chain | Runtime image checks exist, but dependencies/tags remain broad and images are not scanned or signed | Builds are not fully reproducible and dependency changes can reach production unreviewed |
 
 ## Target architecture
