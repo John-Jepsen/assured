@@ -20,6 +20,12 @@ from insurance_ai.tools.registry import load_all_tools
 
 log = get_logger("api")
 
+# Liveness/readiness probes must keep answering while the service is under load or
+# actively being flooded, so they are the only HTTP paths outside the per-IP budget.
+# Everything else -- including the root-mounted, token-authenticated /metrics scrape
+# endpoint -- is bounded, so its bearer token cannot be brute-forced at line rate.
+RATE_LIMIT_EXEMPT_PATHS = frozenset({"/health", "/ready"})
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -58,19 +64,20 @@ def create_app() -> FastAPI:
         version=__version__,
         lifespan=lifespan,
     )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.allowed_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
+    # Starlette applies middleware in reverse registration order: `add_middleware`
+    # prepends, so the LAST one registered is the OUTERMOST wrapper. Registering the
+    # rate limiter first and CORS second therefore puts CORSMiddleware *outside* the
+    # limiter, which is what lets a short-circuited 429 travel back out through CORS
+    # and carry Access-Control-Allow-Origin. With the old ordering the limiter was
+    # outermost and its 429 bypassed CORS entirely, so a browser saw an opaque
+    # network failure instead of a readable status and could not back off.
+    # Resulting stack, outermost -> innermost:
+    #   ObservabilityMiddleware -> CORSMiddleware -> rate limit -> router
     @app.middleware("http")
     async def _rate_limit_http(request, call_next):
         # Health probes and browser preflights must remain available during an
-        # incident; every application HTTP endpoint is bounded by source IP.
-        if request.method != "OPTIONS" and request.url.path.startswith("/api/"):
+        # incident; every other HTTP endpoint is bounded by source IP.
+        if request.method != "OPTIONS" and request.url.path not in RATE_LIMIT_EXEMPT_PATHS:
             decision = await http_ip_limit(request)
             if not decision.allowed:
                 return JSONResponse(
@@ -79,6 +86,14 @@ def create_app() -> FastAPI:
                     headers={"Retry-After": str(decision.retry_after)},
                 )
         return await call_next(request)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.add_middleware(ObservabilityMiddleware)
 
     from insurance_ai.api import (

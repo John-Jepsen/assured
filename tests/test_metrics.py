@@ -52,6 +52,27 @@ def client():
 
 
 @pytest.fixture
+def limited(monkeypatch):
+    """Install throwaway rate-limit settings plus a private limiter.
+
+    ``get_settings`` and ``get_rate_limiter`` are ``lru_cache``d singletons, so the
+    names are patched inside ``security.rate_limit`` rather than the caches mutated;
+    the counters then live on a limiter that dies with the test.
+    """
+    from insurance_ai.security import rate_limit
+    from insurance_ai.security.rate_limit import MemoryRateLimiter
+
+    def _install(**overrides) -> MemoryRateLimiter:
+        settings = Settings(_env_file=None, **overrides)
+        limiter = MemoryRateLimiter(settings.rate_limit_memory_max_buckets)
+        monkeypatch.setattr(rate_limit, "get_settings", lambda: settings)
+        monkeypatch.setattr(rate_limit, "get_rate_limiter", lambda: limiter)
+        return limiter
+
+    return _install
+
+
+@pytest.fixture
 def metrics_on(monkeypatch):
     """Enable the endpoint with a known token, without touching cached global settings."""
     from insurance_ai.api import routes_metrics
@@ -278,7 +299,8 @@ def test_metrics_token_comparison_is_constant_time(client, metrics_on, monkeypat
 
     monkeypatch.setattr(metrics_on, "secrets", RecordingSecrets)
     assert client.get("/metrics", headers=AUTH).status_code == 401
-    assert calls == [(f"Bearer {TOKEN}", f"Bearer {TOKEN}")]
+    # Both operands are bytes: compare_digest raises TypeError on non-ASCII str.
+    assert calls == [(f"Bearer {TOKEN}".encode(), f"Bearer {TOKEN}".encode())]
 
 
 def test_metrics_returns_prometheus_exposition_text(client, metrics_on):
@@ -446,14 +468,89 @@ def test_metrics_body_leaks_no_identity_factors_secrets_or_pii(api_client, metri
     }
 
 
-def test_non_ascii_authorization_header_raises_instead_of_returning_401(client, metrics_on):
-    """KNOWN BUG: secrets.compare_digest raises TypeError on non-ASCII str input.
+def test_non_ascii_authorization_header_returns_401(client, metrics_on):
+    """A non-ASCII credential is just a wrong credential, not a server error.
 
-    Header bytes are latin-1 decoded by the ASGI layer, so an unauthenticated caller can
-    force an unhandled TypeError out of the route. In the running app the global handler
-    turns that into a 500 ("internal_error") instead of a clean 401; under TestClient the
-    exception surfaces directly. This pins current behavior and should become a 401
-    assertion once the route guards the comparison.
+    The ASGI layer latin-1 decodes header bytes, and ``secrets.compare_digest`` refuses
+    non-ASCII ``str`` operands with a TypeError. Comparing bytes keeps an anonymous
+    caller from turning an arbitrary header value into a 500 ("internal_error") plus an
+    ``unhandled_error`` log line -- a free error-noise amplifier.
     """
-    with pytest.raises(TypeError, match="non-ASCII"):
-        client.get("/metrics", headers={b"authorization": "Bearer é".encode("latin-1")})
+    for raw in (b"Bearer \xe9", b"\xff\xfe", f"Bearer {TOKEN}\xe9".encode("latin-1")):
+        response = client.get("/metrics", headers={b"authorization": raw})
+        assert response.status_code == 401, raw
+        assert response.headers["www-authenticate"] == "Bearer"
+        assert "insurance_ai_http_requests_total" not in response.text
+
+
+# ------------------------------------------------------------------------- rate limits
+
+
+def test_metrics_endpoint_is_bounded_by_the_per_ip_rate_limit(client, metrics_on, limited):
+    """The token is guessable only as fast as the limiter allows.
+
+    /metrics is mounted at the root, so the middleware's old ``/api/`` prefix test left
+    it completely unlimited -- and compose publishes port 8000 directly.
+    """
+    limited(rate_limit_http_ip_requests=2)
+
+    for _ in range(2):
+        assert client.get("/metrics", headers={"authorization": "Bearer guess"}).status_code == 401
+
+    blocked = client.get("/metrics", headers={"authorization": "Bearer guess"})
+    assert blocked.status_code == 429
+    assert blocked.json() == {"error": "rate_limited", "message": "Too many requests."}
+    assert int(blocked.headers["Retry-After"]) >= 1
+    # The budget is per source IP, so a valid token is throttled the same way.
+    assert client.get("/metrics", headers=AUTH).status_code == 429
+
+
+def test_health_and_readiness_stay_exempt_from_the_rate_limit(client, limited):
+    """Probes must keep answering during exactly the flood that exhausts the budget."""
+    limited(rate_limit_http_ip_requests=1)
+    assert client.get("/metrics").status_code == 404  # spends the whole budget
+    assert client.get("/metrics").status_code == 429
+
+    for _ in range(5):
+        assert client.get("/health").status_code == 200
+        # This fixture skips the DB setup, so /ready may report 503 -- never 429.
+        assert client.get("/ready").status_code in {200, 503}
+
+
+def test_rate_limited_response_carries_cors_headers(client, limited):
+    """A 429 must be readable by the browser so the client can back off.
+
+    The limiter short-circuits before the router, so it only inherits CORS headers if
+    CORSMiddleware wraps it. Starlette applies middleware in reverse registration
+    order, so CORS must be registered *after* the limiter to sit outside it.
+    """
+    origin = "http://localhost:5173"
+    limited(rate_limit_http_ip_requests=1)
+
+    allowed = client.get("/metrics", headers={"origin": origin})
+    assert allowed.status_code == 404
+    assert allowed.headers["access-control-allow-origin"] == origin
+
+    blocked = client.get("/metrics", headers={"origin": origin})
+    assert blocked.status_code == 429
+    assert blocked.headers["access-control-allow-origin"] == origin
+    assert blocked.headers["access-control-allow-credentials"] == "true"
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+
+def test_cors_preflight_still_bypasses_an_exhausted_budget(client, limited):
+    """Reordering must not cost preflights their exemption."""
+    limited(rate_limit_http_ip_requests=1)
+    assert client.get("/metrics").status_code == 404
+    assert client.get("/metrics").status_code == 429
+
+    for _ in range(3):
+        preflight = client.options(
+            "/api/chat",
+            headers={
+                "origin": "http://localhost:5173",
+                "access-control-request-method": "POST",
+            },
+        )
+        assert preflight.status_code == 200
+        assert preflight.headers["access-control-allow-origin"] == "http://localhost:5173"
