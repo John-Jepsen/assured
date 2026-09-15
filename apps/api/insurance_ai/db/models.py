@@ -255,6 +255,10 @@ class KnowledgeDocument(Base):
     product_type: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     category: Mapped[str] = mapped_column(String)  # billing, claims, faq, ...
     content: Mapped[str] = mapped_column(Text)
+    # Both are nullable for rows created before versioned ingestion was introduced.
+    # The next ingestion pass fills them and avoids re-embedding unchanged content.
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ingestion_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     chunks: Mapped[list[DocumentChunk]] = relationship(back_populates="document")
 

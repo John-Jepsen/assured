@@ -35,7 +35,7 @@ async def main(
 ) -> None:
     from sqlalchemy import func, select
 
-    from insurance_ai.db.models import Customer, KnowledgeDocument
+    from insurance_ai.db.models import Customer
 
     engine = get_engine()
     maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -55,24 +55,14 @@ async def main(
                 log.info("seeded", **seed_counts)
 
         if ingest:
-            existing_documents = await db.scalar(
-                select(func.count()).select_from(KnowledgeDocument)
+            # Ingestion is fingerprinted and incremental, so it must run even when
+            # documents already exist to detect changed and removed source files.
+            rag_counts = await ingest_directory(db, knowledge_dir, get_providers().embedding)
+            log.info(
+                "ingested",
+                provider=get_providers().embedding.name,
+                **rag_counts,
             )
-            if if_empty and existing_documents:
-                log.info(
-                    "ingest_skipped",
-                    reason="already_ingested",
-                    documents=int(existing_documents),
-                )
-            else:
-                rag_counts = await ingest_directory(
-                    db, knowledge_dir, get_providers().embedding
-                )
-                log.info(
-                    "ingested",
-                    provider=get_providers().embedding.name,
-                    **rag_counts,
-                )
     await engine.dispose()
     print(
         f"Bootstrap complete: seed={seed_counts or 'skipped'}, "
@@ -86,7 +76,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--if-empty",
         action="store_true",
-        help="Skip each selected operation when its target table already contains data.",
+        help="Skip demo seeding when customers exist; ingestion remains incremental.",
     )
     parser.add_argument(
         "--skip-seed",
